@@ -1,0 +1,24 @@
+mujoco_simulator:
+    # 使用的模型名称 目前的可选项如下
+    # G1_29dof_float, 
+    # G1_29dof,
+    # S1_20dof_simp_col
+    # S1_20dof_simp_col_float, 
+    # S2_12dof_lock_arm_simp_col_float, 
+    # S2_12dof_lock_arm_simp_col
+    # S2_20dof_simp_col_float
+    # S2_20dof_simp_col
+
+    modelName: "G1_29dof" 
+    # modelName: "S2_12dof_lock_arm_simp_col" 
+    
+    # 电机状态与命令topic
+    lowStateTopic: "/human_lower_state" 
+    jointCommandsTopic: "/human_lower_command" 
+
+    # 加载模型后是否暂停
+    unPauseService: "/unpause_mujoco" # 启动服务名称
+    initPauseFlag: true # 1是会暂停,0是不会暂停
+
+    # 是否输出模型信息表格
+    modelTableFlag: true # 1是会,0是不会
