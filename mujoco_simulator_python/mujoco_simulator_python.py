@@ -11,11 +11,17 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich import box
-import math
 from std_srvs.srv import Empty
 from threading import Thread
 from rclpy.executors import MultiThreadedExecutor
 import numpy as np
+from mujoco_lidar.scan_gen import LivoxGenerator
+from mujoco_lidar.scan_gen import generate_grid_scan_pattern
+from mujoco_lidar.lidar_wrapper import MjLidarWrapper
+from sensor_msgs.msg import PointCloud2, PointField
+from std_msgs.msg import Header
+from geometry_msgs.msg import TransformStamped
+from tf2_ros import TransformBroadcaster
 
 
 class mujoco_simulator(Node):
@@ -87,8 +93,34 @@ class mujoco_simulator(Node):
         self.read_error_flag = False  # 传感器读取错误标志
         if self.param["initPauseFlag"]: self.pause = True
 
+        # 测试雷达
+        livox_generator = LivoxGenerator("mid360")
+        self.rays_theta, self.rays_phi = livox_generator.sample_ray_angles()
+        # self.rays_theta, self.rays_phi = generate_grid_scan_pattern(
+        #     num_ray_cols=360,  # 水平分辨率
+        #     num_ray_rows=64,   # 垂直分辨率
+        #     theta_range=(-np.pi, np.pi),    # 水平扫描范围（弧度）
+        #     phi_range=(-np.pi, np.pi)   # 垂直扫描范围（弧度）
+        # )
+        self.lidar_sim = MjLidarWrapper(
+            self.mj_model, 
+            self.mj_data, 
+            site_name="lidar_site",  # 与MJCF中的<site name="...">匹配
+            args={
+                "enable_profiling": False, # 启用性能分析（可选）
+                "verbose": False           # 显示详细信息（可选）
+            }
+        )
+        self.lidar_count = 0
+        self.point_cloud_pub = self.create_publisher(
+            PointCloud2,
+            "/point_cloud",
+            100
+        )
+        self.tf_broadcaster = TransformBroadcaster(self)
+
     def run(self):
-        """物理仿真主循环"""
+        """物理仿真主循环, 默认500Hz"""
         # 将ros spin加入单独的线程中
         ros_thread = Thread(target=self.ros_spin, args=(self,), daemon=True)
         ros_thread.start()
@@ -105,12 +137,74 @@ class mujoco_simulator(Node):
 
                 # 发布当前状态
                 self.publish_low_state()
+
+                # 测试雷达
+                if self.lidar_count % 50 == 0:
+                    self.lidar_sim.update_scene(self.mj_model, self.mj_data)
+                    points = self.lidar_sim.get_lidar_points(self.rays_phi, self.rays_theta, self.mj_data)
+                    # pointcloud_msg = self.create_pointcloud2_msg(points)
+                    self.point_cloud_pub.publish(self.numpy_to_pointcloud2(points))
+                    self.broadcast_timer_callback()
+                    self.get_logger().info('发布了点云数据')
+                self.lidar_count += 1
                 
 
                 # sleep 以保证仿真实时
                 time_until_next_step = self.mj_model.opt.timestep - (time.time() - step_start)
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step)
+
+    def numpy_to_pointcloud2(self, points):
+        """将numpy数组转换为PointCloud2消息"""
+        # 创建PointCloud2消息对象
+        msg = PointCloud2()
+        
+        # 设置消息头
+        msg.header = Header()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'world'  # 或者你需要的坐标系
+        
+        # 定义点云字段 (x, y, z)
+        msg.fields = [
+            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1)
+        ]
+        
+        # 设置点云属性
+        msg.is_bigendian = False
+        msg.point_step = 12  # 每个点12字节 (3个float32 * 4字节)
+        msg.row_step = msg.point_step * len(points)
+        msg.height = 1  # 非结构化点云
+        msg.width = len(points)
+        msg.is_dense = True  # 没有无效点
+        
+        # 关键：将numpy数组转换为字节数据
+        msg.data = points.astype(np.float32).tobytes()
+        
+        return msg
+
+    def broadcast_timer_callback(self):
+        # 创建变换消息
+        t = TransformStamped()
+        
+        # 设置消息头
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'map'
+        t.child_frame_id = 'world'
+        
+        # 设置变换（这里设置为原点，无旋转）
+        t.transform.translation.x = 0.0
+        t.transform.translation.y = 0.0
+        t.transform.translation.z = 0.0
+        
+        t.transform.rotation.x = 0.0
+        t.transform.rotation.y = 1.0
+        t.transform.rotation.z = 0.0
+        t.transform.rotation.w = 0.0
+        
+        # 发布变换
+        self.tf_broadcaster.sendTransform(t)
 
     def pd_controller(self, model, data):
         """mujoco控制回调,根据命令值计算力矩
@@ -129,9 +223,6 @@ class mujoco_simulator(Node):
         sensor_vel = np.array(self.sensor_data_list[self.joint_vel_head_id:self.joint_vel_head_id + self.mj_model.nu])
 
         data.ctrl = kp_cmd_list * (pos_cmd_list - sensor_pos) + kd_cmd_list * (vel_cmd_list - sensor_vel) + eff_cmd_list
-
-
-
 
     def low_cmd_callback(self, msg: MITJointCommands):
         """控制器命令回调函数
@@ -191,8 +282,7 @@ class mujoco_simulator(Node):
         if self.keyframe_count > 0: mujoco.mj_resetDataKeyframe(self.mj_model, self.mj_data, 0)
 
         return response  # 返回空响应
-            
-
+         
     def ros_spin(self, node):
         """放在第二个线程中运行,执行ros2回调"""
         executor = MultiThreadedExecutor()
