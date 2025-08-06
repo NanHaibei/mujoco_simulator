@@ -13,6 +13,9 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 import math
+from std_srvs.srv import Empty
+from threading import Thread
+from rclpy.executors import MultiThreadedExecutor
 
 
 class mujoco_simulator(Node):
@@ -47,7 +50,7 @@ class mujoco_simulator(Node):
 
         # 读取模型信息并输出
         self.read_model()
-        self.show_model()
+        if self.param["modelTableFlag"]: self.show_model()
 
         # 设置控制回调
         mujoco.set_mjcb_control(self.pd_controller)
@@ -66,6 +69,12 @@ class mujoco_simulator(Node):
             self.low_cmd_callback,
             10  # 队列大小
         )
+        # 仿真启动服务
+        self.unpause_server = self.create_service(
+            Empty,  # 假设服务类型为Unpause
+            self.param["unPauseService"],  # 替换为实际的服务名称
+            self.unpause_callback
+        )
 
         # 初始化变量
         self.low_state_msg = MITLowState()
@@ -75,20 +84,25 @@ class mujoco_simulator(Node):
         self.low_cmd_msg = MITJointCommands()
         self.low_cmd_msg.commands = [MITJointCommand() for _ in range(self.mj_model.nu)]
         self.read_error_flag = False  # 传感器读取错误标志
+        if self.param["initPauseFlag"]: self.pause = True
 
     def run(self):
         """物理仿真主循环"""
+        # 将ros spin加入单独的线程中
+        ros_thread = Thread(target=self.ros_spin, args=(self,), daemon=True)
+        ros_thread.start()
 
+        # 开启mujoco窗口
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
             while viewer.is_running():
                 # 记录当前运行时间
                 step_start = time.time()
 
                 # 进行物理仿真，渲染画面
-                mujoco.mj_step(self.mj_model, self.mj_data)
+                if not self.pause: mujoco.mj_step(self.mj_model, self.mj_data)
                 viewer.sync()
 
-                # 发布状态
+                # 发布当前状态
                 self.publish_low_state()
 
                 # sleep 以保证仿真实时
@@ -97,10 +111,14 @@ class mujoco_simulator(Node):
                     time.sleep(time_until_next_step)
 
     def pd_controller(self, model, data):
+        """mujoco控制回调,根据命令值计算力矩
 
-        self.spin_some()  # 处理ROS2消息
+        Args:
+            model : mj_model
+            data : mj_data
+        """
 
-        # 执行PD控制器
+        # 对每一个电机执行PD控制器
         for i in range(self.mj_model.nu):
             data.ctrl[i] = self.low_cmd_msg.commands[i].kp * (self.low_cmd_msg.commands[i].pos - data.sensordata[self.joint_pos_head_id + i]) \
                           + self.low_cmd_msg.commands[i].kd * (self.low_cmd_msg.commands[i].vel - data.sensordata[self.joint_vel_head_id + i]) \
@@ -109,11 +127,14 @@ class mujoco_simulator(Node):
             # 如果控制值为NaN，则设置为0.0
             if math.isnan(data.ctrl[i]): data.ctrl[i] = 0.0  
 
-    def spin_some(self):
-        while rclpy.spin_once(self, timeout_sec=0):
-            pass
 
-    def low_cmd_callback(self, msg):
+
+    def low_cmd_callback(self, msg: MITJointCommands):
+        """控制器命令回调函数
+
+        Args:
+            msg (MITJointCommands): 控制器命令
+        """
         # 如果读取错误标志为真，则不处理命令
         if self.read_error_flag: return
         if len(msg.commands) != self.mj_model.nu:
@@ -124,7 +145,8 @@ class mujoco_simulator(Node):
         self.low_cmd_msg = msg
 
     def publish_low_state(self):
-        """发布低频状态"""
+        """发布机器人状态"""
+
         # 如果读取错误标志为真，则不发布状态
         if self.read_error_flag: return
 
@@ -152,7 +174,30 @@ class mujoco_simulator(Node):
         # 发布当前状态
         self.lowState_pub.publish(self.low_state_msg)
 
+    def unpause_callback(self, request, response):
+        """仿真启动回调"""
+        # 处理 unpause 请求
+        self.get_logger().info("Unpause service called")
+        # 启动物理仿真
+        self.pause = False
+        # 应用第一个关键帧作为初始位
+        if self.keyframe_count > 0: mujoco.mj_resetDataKeyframe(self.mj_model, self.mj_data, 0)
+
+        return response  # 返回空响应
+            
+
+    def ros_spin(self, node):
+        """放在第二个线程中运行,执行ros2回调"""
+        executor = MultiThreadedExecutor()
+        executor.add_node(node)
+        executor.spin()
+
     def show_model(self):
+        """
+        输出读取到的机器人模型信息
+        GPT写的,没检查过
+        """
+
         console = Console()
 
         # --------- 总信息 ---------
@@ -235,9 +280,9 @@ class mujoco_simulator(Node):
         if self.read_error_flag:
             console.print("[bold red][ERROR][/bold red] 传感器参数缺失,将不会进行ROS通信")
 
-
-
     def read_model(self):
+        """从mjcf中读取模型信息"""
+
         # 初始化变量
         self.joint_name = []
         self.joint_pos_range = []
@@ -343,20 +388,6 @@ class mujoco_simulator(Node):
             temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, self.mj_model.sensor_objid[i])
             self.sensor_type.append([temp_name, temp_type, temp_attch])
 
-# if __name__ == "__main__":
-#     m = mujoco.MjModel.from_xml_path("/home/nanhaibei/project/rl_das/src/rl_das/robot_description/G1/mjcf/scene_G1_29dof.xml")
-#     d = mujoco.MjData(m)
-#     mujoco.set_mjcb_control(test)
-#     with mujoco.viewer.launch_passive(m, d) as viewer:
-#         while viewer.is_running():
-#             step_start = time.time()
-#             mujoco.mj_step(m, d)
-#             viewer.sync()
-#             time_until_next_step = m.opt.timestep - (time.time() - step_start)
-#             if time_until_next_step > 0:
-#                 time.sleep(time_until_next_step)
-
-
 def main(args=None):
     rclpy.init(args=args)
     yaml_path = os.path.join(
@@ -365,10 +396,6 @@ def main(args=None):
     )
     node = mujoco_simulator(yaml_path)
     node.run()
-    # rclpy.spin(node)
-    # node.destroy_node()
-    # rclpy.shutdown()
-    
 
 if __name__ == '__main__':
     main()
