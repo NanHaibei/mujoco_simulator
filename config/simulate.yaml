@@ -9,8 +9,8 @@ mujoco_simulator:
     # S2_20dof_simp_col_float
     # S2_20dof_simp_col
 
-    modelName: "G1_29dof" 
-    # modelName: "S2_12dof_lock_arm_simp_col" 
+    # modelName: "G1_29dof" 
+    modelName: "S2_20dof_simp_col" 
     
     # 电机状态与命令topic
     lowStateTopic: "/human_lower_state" 

@@ -7,7 +7,6 @@ from ament_index_python.packages import get_package_share_directory
 from mit_msgs.msg import MITLowState, MITJointCommand, MITJointCommands
 import os
 import yaml
-from tabulate import tabulate
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -16,6 +15,7 @@ import math
 from std_srvs.srv import Empty
 from threading import Thread
 from rclpy.executors import MultiThreadedExecutor
+import numpy as np
 
 
 class mujoco_simulator(Node):
@@ -47,6 +47,7 @@ class mujoco_simulator(Node):
         # 实例化mujoco的model和data
         self.mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
         self.mj_data = mujoco.MjData(self.mj_model)
+        self.sensor_data_list = list(self.mj_data.sensordata)
 
         # 读取模型信息并输出
         self.read_model()
@@ -100,10 +101,11 @@ class mujoco_simulator(Node):
 
                 # 进行物理仿真，渲染画面
                 if not self.pause: mujoco.mj_step(self.mj_model, self.mj_data)
-                viewer.sync()
+                viewer.sync() # 影响实时性的大头
 
                 # 发布当前状态
                 self.publish_low_state()
+                
 
                 # sleep 以保证仿真实时
                 time_until_next_step = self.mj_model.opt.timestep - (time.time() - step_start)
@@ -117,15 +119,17 @@ class mujoco_simulator(Node):
             model : mj_model
             data : mj_data
         """
+        # 向量化一次完成运算
+        kp_cmd_list = np.array([cmd.kp for cmd in self.low_cmd_msg.commands])
+        kd_cmd_list = np.array([cmd.kd for cmd in self.low_cmd_msg.commands])
+        pos_cmd_list = np.array([cmd.pos for cmd in self.low_cmd_msg.commands])
+        vel_cmd_list = np.array([cmd.vel for cmd in self.low_cmd_msg.commands])
+        eff_cmd_list = np.array([cmd.eff for cmd in self.low_cmd_msg.commands])
+        sensor_pos = np.array(self.sensor_data_list[self.joint_pos_head_id:self.joint_pos_head_id + self.mj_model.nu])
+        sensor_vel = np.array(self.sensor_data_list[self.joint_vel_head_id:self.joint_vel_head_id + self.mj_model.nu])
 
-        # 对每一个电机执行PD控制器
-        for i in range(self.mj_model.nu):
-            data.ctrl[i] = self.low_cmd_msg.commands[i].kp * (self.low_cmd_msg.commands[i].pos - data.sensordata[self.joint_pos_head_id + i]) \
-                          + self.low_cmd_msg.commands[i].kd * (self.low_cmd_msg.commands[i].vel - data.sensordata[self.joint_vel_head_id + i]) \
-                            + self.low_cmd_msg.commands[i].eff
-        
-            # 如果控制值为NaN，则设置为0.0
-            if math.isnan(data.ctrl[i]): data.ctrl[i] = 0.0  
+        data.ctrl = kp_cmd_list * (pos_cmd_list - sensor_pos) + kd_cmd_list * (vel_cmd_list - sensor_vel) + eff_cmd_list
+
 
 
 
@@ -147,25 +151,28 @@ class mujoco_simulator(Node):
     def publish_low_state(self):
         """发布机器人状态"""
 
+        # 将数据切片一次操作
+        self.sensor_data_list = list(self.mj_data.sensordata)
+
         # 如果读取错误标志为真，则不发布状态
         if self.read_error_flag: return
-
+        
         # 更新电机状态
-        for i in range(self.mj_model.nu):
-            self.low_state_msg.joint_states.position[i] = self.mj_data.sensordata[i + self.joint_pos_head_id]
-            self.low_state_msg.joint_states.velocity[i] = self.mj_data.sensordata[i + self.joint_vel_head_id]
-            self.low_state_msg.joint_states.effort[i] = self.mj_data.sensordata[i + self.joint_tor_head_id]
+        self.low_state_msg.joint_states.position = self.sensor_data_list[self.joint_pos_head_id : self.joint_pos_head_id + self.mj_model.nu]
+        self.low_state_msg.joint_states.velocity = self.sensor_data_list[self.joint_vel_head_id : self.joint_vel_head_id + self.mj_model.nu]
+        self.low_state_msg.joint_states.effort = self.sensor_data_list[self.joint_tor_head_id : self.joint_tor_head_id + self.mj_model.nu]
         # 更新IMU状态
-        self.low_state_msg.imu.orientation.w = self.mj_data.sensordata[self.imu_quat_head_id + 0]
-        self.low_state_msg.imu.orientation.x = self.mj_data.sensordata[self.imu_quat_head_id + 1]
-        self.low_state_msg.imu.orientation.y = self.mj_data.sensordata[self.imu_quat_head_id + 2]
-        self.low_state_msg.imu.orientation.z = self.mj_data.sensordata[self.imu_quat_head_id + 3]
-        self.low_state_msg.imu.angular_velocity.x = self.mj_data.sensordata[self.imu_gyro_head_id + 0]
-        self.low_state_msg.imu.angular_velocity.y = self.mj_data.sensordata[self.imu_gyro_head_id + 1]
-        self.low_state_msg.imu.angular_velocity.z = self.mj_data.sensordata[self.imu_gyro_head_id + 2]
-        self.low_state_msg.imu.linear_acceleration.x = self.mj_data.sensordata[self.imu_acc_head_id + 0]
-        self.low_state_msg.imu.linear_acceleration.y = self.mj_data.sensordata[self.imu_acc_head_id + 1]
-        self.low_state_msg.imu.linear_acceleration.z = self.mj_data.sensordata[self.imu_acc_head_id + 2]
+        self.low_state_msg.imu.orientation.w = self.sensor_data_list[self.imu_quat_head_id + 0]
+        self.low_state_msg.imu.orientation.x = self.sensor_data_list[self.imu_quat_head_id + 1]
+        self.low_state_msg.imu.orientation.y = self.sensor_data_list[self.imu_quat_head_id + 2]
+        self.low_state_msg.imu.orientation.z = self.sensor_data_list[self.imu_quat_head_id + 3]
+        self.low_state_msg.imu.angular_velocity.x = self.sensor_data_list[self.imu_gyro_head_id + 0]
+        self.low_state_msg.imu.angular_velocity.y = self.sensor_data_list[self.imu_gyro_head_id + 1]
+        self.low_state_msg.imu.angular_velocity.z = self.sensor_data_list[self.imu_gyro_head_id + 2]
+        self.low_state_msg.imu.linear_acceleration.x = self.sensor_data_list[self.imu_acc_head_id + 0]
+        self.low_state_msg.imu.linear_acceleration.y = self.sensor_data_list[self.imu_acc_head_id + 1]
+        self.low_state_msg.imu.linear_acceleration.z = self.sensor_data_list[self.imu_acc_head_id + 2]
+    
         # 更新时间戳
         self.low_state_msg.stamp = self.get_clock().now().to_msg()
         self.low_state_msg.joint_states.header.stamp = self.low_state_msg.stamp
