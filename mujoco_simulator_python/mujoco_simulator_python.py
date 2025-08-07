@@ -119,40 +119,54 @@ class mujoco_simulator(Node):
         )
         self.tf_broadcaster = TransformBroadcaster(self)
 
+
+        self.mujoco_step_time = 0.0
+
+        self.create_timer(1.0/10.0, self.lidar_callback)
+        self.create_timer(1.0/10.0, self.show_log)
+
+        
+
     def run(self):
         """物理仿真主循环, 默认500Hz"""
-        # 将ros spin加入单独的线程中
-        ros_thread = Thread(target=self.ros_spin, args=(self,), daemon=True)
-        ros_thread.start()
 
         # 开启mujoco窗口
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
             while viewer.is_running():
                 # 记录当前运行时间
-                step_start = time.time()
+                self.temp_time1 = time.time()
 
                 # 进行物理仿真，渲染画面
-                if not self.pause: mujoco.mj_step(self.mj_model, self.mj_data)
+                # if not self.pause: mujoco.mj_step(self.mj_model, self.mj_data)
+                mujoco.mj_step(self.mj_model, self.mj_data)
                 viewer.sync() # 影响实时性的大头
 
-                # 发布当前状态
-                self.publish_low_state()
+                # 处理ROS回调（非阻塞）
+                rclpy.spin_once(self, timeout_sec=0.0)
+    
+                self.temp_time2 = time.time()
+                self.mujoco_step_time = self.temp_time2 - self.temp_time1
 
-                # 测试雷达
-                if self.lidar_count % 50 == 0:
-                    self.lidar_sim.update_scene(self.mj_model, self.mj_data)
-                    points = self.lidar_sim.get_lidar_points(self.rays_phi, self.rays_theta, self.mj_data)
-                    # pointcloud_msg = self.create_pointcloud2_msg(points)
-                    self.point_cloud_pub.publish(self.numpy_to_pointcloud2(points))
-                    self.broadcast_timer_callback()
-                    self.get_logger().info('发布了点云数据')
-                self.lidar_count += 1
+                # 发布当前状态
+                self.publish_low_state() # 200us
+
                 
 
                 # sleep 以保证仿真实时
-                time_until_next_step = self.mj_model.opt.timestep - (time.time() - step_start)
+                time_until_next_step = self.mj_model.opt.timestep - (time.time() - self.temp_time1)
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step)
+                 
+
+    def lidar_callback(self):
+        self.lidar_sim.update_scene(self.mj_model, self.mj_data)
+        points = self.lidar_sim.get_lidar_points(self.rays_phi, self.rays_theta, self.mj_data)
+        self.point_cloud_pub.publish(self.numpy_to_pointcloud2(points))
+        self.broadcast_timer_callback()
+
+    def show_log(self):
+        """输出日志"""
+        self.get_logger().info(f"物理仿真渲染耗时: {self.mujoco_step_time:.4f} 秒")
 
     def numpy_to_pointcloud2(self, points):
         """将numpy数组转换为PointCloud2消息"""
