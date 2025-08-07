@@ -31,16 +31,27 @@ class mujoco_simulator(Node):
         # 读取launch中传来的参数
         self.declare_parameter('use_lidar', False)  # launch文件中的参数
         self.declare_parameter('yaml_path', " ")  # launch文件中的参数
+        self.declare_parameter('sensor_yaml_path', " ")  # launch文件中的参数
         self.declare_parameter('mjcf_path', " ")  # launch文件中的参数
         self.use_lidar = self.get_parameter('use_lidar').get_parameter_value().bool_value
         yaml_path = self.get_parameter('yaml_path').get_parameter_value().string_value
         mjcf_path = self.get_parameter('mjcf_path').get_parameter_value().string_value
+        sensor_yaml_path = self.get_parameter('sensor_yaml_path').get_parameter_value().string_value
 
         # 读取yaml文件
         with open(yaml_path, 'r') as f:
             try:
                 param = yaml.safe_load(f)  # 返回字典/列表[3](@ref)
                 self.param = param["mujoco_simulator"]
+            except yaml.YAMLError as e:
+                print(f"YAML解析失败: {e}")
+
+        # 读取传感器yaml文件
+        with open(sensor_yaml_path, 'r') as f:
+            try:
+                param = yaml.safe_load(f)  # 返回字典/列表[3](@ref)
+                print(param)
+                self.param.update(param["sensor_cfg"])
             except yaml.YAMLError as e:
                 print(f"YAML解析失败: {e}")
 
@@ -73,7 +84,7 @@ class mujoco_simulator(Node):
         self.real_vel_pub = self.create_publisher( # 发布线速度真值
             Vector3Stamped, "/sim_real_vel", 10
         )
-        # self.create_timer(1.0/10.0, self.show_log) # 10Hz输出log信息
+        self.create_timer(1.0/10.0, self.show_log) # 10Hz输出log信息
         self.create_timer(1.0/10.0, self.publish_sim_states) # 10Hz发布真值信息
         self.tf_broadcaster = TransformBroadcaster(self)  # 发布tf变换
 
@@ -212,13 +223,13 @@ class mujoco_simulator(Node):
         t.header.stamp = self.get_clock().now().to_msg() # 设置消息头
         t.header.frame_id = self.first_link_name # 设置父坐标系
         t.child_frame_id = 'lidar'
-        t.transform.translation.x = 0.0 # 设置变换
-        t.transform.translation.y = 0.0
-        t.transform.translation.z = 0.416
-        t.transform.rotation.x = 1.0
-        t.transform.rotation.y = 0.0
-        t.transform.rotation.z = 0.0
-        t.transform.rotation.w = 0.0
+        t.transform.translation.x = self.param["lidar"]["translation"]["x"] # 设置变换
+        t.transform.translation.y = self.param["lidar"]["translation"]["y"]
+        t.transform.translation.z = self.param["lidar"]["translation"]["z"]
+        t.transform.rotation.x = self.param["lidar"]["rotation"]["x"]
+        t.transform.rotation.y = self.param["lidar"]["rotation"]["y"]
+        t.transform.rotation.z = self.param["lidar"]["rotation"]["z"]
+        t.transform.rotation.w = self.param["lidar"]["rotation"]["w"]
         self.tf_broadcaster.sendTransform(t) # 发布变换
 
     def show_log(self):
