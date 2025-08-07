@@ -12,22 +12,29 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 from std_srvs.srv import Empty
-from threading import Thread
 from rclpy.executors import MultiThreadedExecutor
 import numpy as np
 from mujoco_lidar.scan_gen import LivoxGenerator
 from mujoco_lidar.scan_gen import generate_grid_scan_pattern
 from mujoco_lidar.lidar_wrapper import MjLidarWrapper
-from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs.msg import PointCloud2, PointField, JointState
 from std_msgs.msg import Header
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import TransformStamped, Vector3Stamped
 from tf2_ros import TransformBroadcaster
 
 
 class mujoco_simulator(Node):
     """调用mujoco物理仿真, 收发ros2消息"""
-    def __init__(self, yaml_path):
+    def __init__(self):
         super().__init__('mujoco_simulator')
+
+        # 读取launch中传来的参数
+        self.declare_parameter('use_lidar', False)  # launch文件中的参数
+        self.declare_parameter('yaml_path', " ")  # launch文件中的参数
+        self.declare_parameter('mjcf_path', " ")  # launch文件中的参数
+        self.use_lidar = self.get_parameter('use_lidar').get_parameter_value().bool_value
+        yaml_path = self.get_parameter('yaml_path').get_parameter_value().string_value
+        mjcf_path = self.get_parameter('mjcf_path').get_parameter_value().string_value
 
         # 读取yaml文件
         with open(yaml_path, 'r') as f:
@@ -37,18 +44,6 @@ class mujoco_simulator(Node):
             except yaml.YAMLError as e:
                 print(f"YAML解析失败: {e}")
 
-        # 获取mjcf路径
-        robot_pkg_path = os.path.join(get_package_share_directory('robot_description'))
-        model_name = self.param["modelName"]
-        if "G1" in model_name:
-            model_type = "G1"
-        elif "S1" in model_name:
-            model_type = "S1"
-        elif "S2" in model_name:
-            model_type = "S2"
-        else:
-            raise ValueError("Unsupported model type in mujoco_simulator_python.py")
-        mjcf_path = robot_pkg_path + "/" + model_type + "/mjcf/scene_" + model_name + ".xml"
 
         # 实例化mujoco的model和data
         self.mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
@@ -62,26 +57,25 @@ class mujoco_simulator(Node):
         # 设置控制回调
         mujoco.set_mjcb_control(self.pd_controller)
 
-        # 底层信息发布
-        self.lowState_pub = self.create_publisher(
-            MITLowState,  # 假设低频状态消息类型为String
-            self.param["lowStateTopic"],  # 替换为实际的低频状态话题名称
-            10  # 队列大小
+        # 声明ROS2接口
+        self.lowState_pub = self.create_publisher( # 发布电机与IMU信息
+            MITLowState, self.param["lowStateTopic"], 10
         )
-
-        # 底层命令接收
-        self.jointCommand_sub = self.create_subscription(
-            MITJointCommands,  # 假设底层命令消息类型为String
-            self.param["jointCommandsTopic"],  # 替换为实际的底层命令话题名称
-            self.low_cmd_callback,
-            10  # 队列大小
+        self.jointCommand_sub = self.create_subscription( # 接收控制器命令
+            MITJointCommands, self.param["jointCommandsTopic"], self.low_cmd_callback, 10
         )
-        # 仿真启动服务
-        self.unpause_server = self.create_service(
-            Empty,  # 假设服务类型为Unpause
-            self.param["unPauseService"],  # 替换为实际的服务名称
-            self.unpause_callback
+        self.unpause_server = self.create_service( # 仿真启动服务
+            Empty, self.param["unPauseService"], self.unpause_callback
+        )   
+        self.joint_state_pub = self.create_publisher( # 发布关节状态
+            JointState, "/joint_states", 10
         )
+        self.real_vel_pub = self.create_publisher( # 发布线速度真值
+            Vector3Stamped, "/sim_real_vel", 10
+        )
+        # self.create_timer(1.0/10.0, self.show_log) # 10Hz输出log信息
+        self.create_timer(1.0/10.0, self.publish_sim_states) # 10Hz发布真值信息
+        self.tf_broadcaster = TransformBroadcaster(self)  # 发布tf变换
 
         # 初始化变量
         self.low_state_msg = MITLowState()
@@ -91,41 +85,34 @@ class mujoco_simulator(Node):
         self.low_cmd_msg = MITJointCommands()
         self.low_cmd_msg.commands = [MITJointCommand() for _ in range(self.mj_model.nu)]
         self.read_error_flag = False  # 传感器读取错误标志
-        if self.param["initPauseFlag"]: self.pause = True
-
-        # 测试雷达
-        livox_generator = LivoxGenerator("mid360")
-        self.rays_theta, self.rays_phi = livox_generator.sample_ray_angles()
-        # self.rays_theta, self.rays_phi = generate_grid_scan_pattern(
-        #     num_ray_cols=360,  # 水平分辨率
-        #     num_ray_rows=64,   # 垂直分辨率
-        #     theta_range=(-np.pi, np.pi),    # 水平扫描范围（弧度）
-        #     phi_range=(-np.pi, np.pi)   # 垂直扫描范围（弧度）
-        # )
-        self.lidar_sim = MjLidarWrapper(
-            self.mj_model, 
-            self.mj_data, 
-            site_name="lidar_site",  # 与MJCF中的<site name="...">匹配
-            args={
-                "enable_profiling": False, # 启用性能分析（可选）
-                "verbose": False           # 显示详细信息（可选）
-            }
-        )
-        self.lidar_count = 0
-        self.point_cloud_pub = self.create_publisher(
-            PointCloud2,
-            "/point_cloud",
-            100
-        )
-        self.tf_broadcaster = TransformBroadcaster(self)
-
-
+        self.pause = True if self.param["initPauseFlag"] else False
         self.mujoco_step_time = 0.0
 
-        self.create_timer(1.0/10.0, self.lidar_callback)
-        self.create_timer(1.0/10.0, self.show_log)
-
-        
+        # 如果使用雷达
+        if self.use_lidar:
+            # 检查是否有lidar_site
+            lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
+            if lidar_site_id <= 0:
+                raise ValueError("运行雷达仿真但是MJCF文件中未找到lidar_site")
+            # 设置雷达类型
+            livox_generator = LivoxGenerator("mid360")
+            self.rays_theta, self.rays_phi = livox_generator.sample_ray_angles()
+            # 创建雷达句柄
+            self.lidar_sim = MjLidarWrapper(
+                self.mj_model, 
+                self.mj_data, 
+                site_name="lidar_site",  # 与MJCF中的<site name="...">匹配
+                args={
+                    "enable_profiling": False, # 启用性能分析（可选）
+                    "verbose": False           # 显示详细信息（可选）
+                }
+            )
+            
+            # 发布点云与坐标系
+            self.point_cloud_pub = self.create_publisher(
+                PointCloud2, "/point_cloud", 100
+            )
+            self.create_timer(1.0/10.0, self.lidar_callback) # 10Hz发布点云消息
 
     def run(self):
         """物理仿真主循环, 默认500Hz"""
@@ -137,9 +124,9 @@ class mujoco_simulator(Node):
                 self.temp_time1 = time.time()
 
                 # 进行物理仿真，渲染画面
-                # if not self.pause: mujoco.mj_step(self.mj_model, self.mj_data)
-                mujoco.mj_step(self.mj_model, self.mj_data)
-                viewer.sync() # 影响实时性的大头
+                if not self.pause: mujoco.mj_step(self.mj_model, self.mj_data)
+                # mujoco.mj_step(self.mj_model, self.mj_data)
+                viewer.sync() 
 
                 # 处理ROS回调（非阻塞）
                 rclpy.spin_once(self, timeout_sec=0.0)
@@ -150,75 +137,93 @@ class mujoco_simulator(Node):
                 # 发布当前状态
                 self.publish_low_state() # 200us
 
-                
-
                 # sleep 以保证仿真实时
                 time_until_next_step = self.mj_model.opt.timestep - (time.time() - self.temp_time1)
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step)
-                 
+
+    def publish_sim_states(self):
+        """发布关节状态和世界坐标信息"""
+        # 如果模型读取有错误，则不执行操作
+        if self.read_error_flag: return
+            
+        # 发布关节信息
+        joint_state = JointState()
+        joint_state.header.stamp = self.get_clock().now().to_msg()
+        joint_state.name = self.joint_name.copy()
+        joint_state.position = self.sensor_data_list[self.joint_pos_head_id : self.joint_pos_head_id + self.mj_model.nu]
+        joint_state.velocity = self.sensor_data_list[self.joint_vel_head_id : self.joint_vel_head_id + self.mj_model.nu]
+        joint_state.effort = self.sensor_data_list[self.joint_tor_head_id : self.joint_tor_head_id + self.mj_model.nu]
+        self.joint_state_pub.publish(joint_state)
+        
+        # 发布世界坐标信息
+        transform = TransformStamped()
+        transform.header.stamp = self.get_clock().now().to_msg()
+        transform.header.frame_id = "world"
+        transform.child_frame_id = self.first_link_name
+        transform.transform.translation.x = float(self.sensor_data_list[self.real_pos_head_id + 0])
+        transform.transform.translation.y = float(self.sensor_data_list[self.real_pos_head_id + 1])
+        transform.transform.translation.z = float(self.sensor_data_list[self.real_pos_head_id + 2])
+        transform.transform.rotation.w = float(self.sensor_data_list[self.imu_quat_head_id + 0])
+        transform.transform.rotation.x = float(self.sensor_data_list[self.imu_quat_head_id + 1])
+        transform.transform.rotation.y = float(self.sensor_data_list[self.imu_quat_head_id + 2])
+        transform.transform.rotation.z = float(self.sensor_data_list[self.imu_quat_head_id + 3])
+        self.tf_broadcaster.sendTransform(transform)
+        
+        # 发布实际速度信息
+        if self.real_vel_head_id != 999999:  # 检查是否有实际速度传感器
+            real_vel = Vector3Stamped()
+            real_vel.header.stamp = self.get_clock().now().to_msg()
+            real_vel.header.frame_id = self.first_link_name
+            real_vel.vector.x = float(self.sensor_data_list[self.real_vel_head_id + 0])
+            real_vel.vector.y = float(self.sensor_data_list[self.real_vel_head_id + 1])
+            real_vel.vector.z = float(self.sensor_data_list[self.real_vel_head_id + 2])
+            self.real_vel_pub.publish(real_vel)
+
 
     def lidar_callback(self):
+        """获取点云信息并发布"""
+
+        # 获取点云信息
         self.lidar_sim.update_scene(self.mj_model, self.mj_data)
         points = self.lidar_sim.get_lidar_points(self.rays_phi, self.rays_theta, self.mj_data)
-        self.point_cloud_pub.publish(self.numpy_to_pointcloud2(points))
-        self.broadcast_timer_callback()
-
-    def show_log(self):
-        """输出日志"""
-        self.get_logger().info(f"物理仿真渲染耗时: {self.mujoco_step_time:.4f} 秒")
-
-    def numpy_to_pointcloud2(self, points):
-        """将numpy数组转换为PointCloud2消息"""
-        # 创建PointCloud2消息对象
-        msg = PointCloud2()
         
-        # 设置消息头
-        msg.header = Header()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = 'world'  # 或者你需要的坐标系
-        
-        # 定义点云字段 (x, y, z)
-        msg.fields = [
+        # 设置并发布点云信息
+        point_cloud_msg = PointCloud2()
+        point_cloud_msg.header = Header()
+        point_cloud_msg.header.frame_id = 'lidar' 
+        point_cloud_msg.fields = [ # 定义点云字段 (x, y, z)
             PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
             PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
             PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1)
         ]
-        
-        # 设置点云属性
-        msg.is_bigendian = False
-        msg.point_step = 12  # 每个点12字节 (3个float32 * 4字节)
-        msg.row_step = msg.point_step * len(points)
-        msg.height = 1  # 非结构化点云
-        msg.width = len(points)
-        msg.is_dense = True  # 没有无效点
-        
-        # 关键：将numpy数组转换为字节数据
-        msg.data = points.astype(np.float32).tobytes()
-        
-        return msg
+        point_cloud_msg.header.stamp = self.get_clock().now().to_msg()
+        point_cloud_msg.is_bigendian = False
+        point_cloud_msg.point_step = 12  # 每个点12字节 (3个float32 * 4字节)
+        point_cloud_msg.row_step = point_cloud_msg.point_step * len(points)
+        point_cloud_msg.height = 1  # 非结构化点云
+        point_cloud_msg.width = len(points)
+        point_cloud_msg.is_dense = True  # 没有无效点
+        point_cloud_msg.data = points.astype(np.float32).tobytes() # 将numpy数组转换为字节数据
+        self.point_cloud_pub.publish(point_cloud_msg) # 发布点云信息
 
-    def broadcast_timer_callback(self):
-        # 创建变换消息
+        # 点云相对于base_link的坐标转换
         t = TransformStamped()
-        
-        # 设置消息头
-        t.header.stamp = self.get_clock().now().to_msg()
-        t.header.frame_id = 'map'
-        t.child_frame_id = 'world'
-        
-        # 设置变换（这里设置为原点，无旋转）
-        t.transform.translation.x = 0.0
+        t.header.stamp = self.get_clock().now().to_msg() # 设置消息头
+        t.header.frame_id = self.first_link_name # 设置父坐标系
+        t.child_frame_id = 'lidar'
+        t.transform.translation.x = 0.0 # 设置变换
         t.transform.translation.y = 0.0
-        t.transform.translation.z = 0.0
-        
-        t.transform.rotation.x = 0.0
-        t.transform.rotation.y = 1.0
+        t.transform.translation.z = 0.416
+        t.transform.rotation.x = 1.0
+        t.transform.rotation.y = 0.0
         t.transform.rotation.z = 0.0
         t.transform.rotation.w = 0.0
-        
-        # 发布变换
-        self.tf_broadcaster.sendTransform(t)
+        self.tf_broadcaster.sendTransform(t) # 发布变换
+
+    def show_log(self):
+        """输出日志"""
+        self.get_logger().info(f"物理仿真渲染耗时: {self.mujoco_step_time:.4f} 秒")
 
     def pd_controller(self, model, data):
         """mujoco控制回调,根据命令值计算力矩
@@ -297,12 +302,6 @@ class mujoco_simulator(Node):
 
         return response  # 返回空响应
          
-    def ros_spin(self, node):
-        """放在第二个线程中运行,执行ros2回调"""
-        executor = MultiThreadedExecutor()
-        executor.add_node(node)
-        executor.spin()
-
     def show_model(self):
         """
         输出读取到的机器人模型信息
@@ -440,6 +439,9 @@ class mujoco_simulator(Node):
             self.link_name.append((mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, i)))
             self.link_mass.append(self.mj_model.body_mass[i])
 
+        # 记录第一个link的名字作为base_link，不同机器人base_link名称不同
+        self.first_link_name = self.link_name[0]
+
         # 遍历所有sensor,读取参数
         for i in range(self.mj_model.nsensor):
             temp_name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_SENSOR, i)
@@ -501,11 +503,7 @@ class mujoco_simulator(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    yaml_path = os.path.join(
-        get_package_share_directory('mujoco_simulator_python'),
-        'config', 'simulate.yaml'
-    )
-    node = mujoco_simulator(yaml_path)
+    node = mujoco_simulator()
     node.run()
 
 if __name__ == '__main__':
