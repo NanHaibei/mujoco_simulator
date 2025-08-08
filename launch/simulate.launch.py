@@ -18,23 +18,6 @@ from launch.conditions import IfCondition
 
 def generate_launch_description():
 
-    # 声明launch参数
-    use_lidar_arg = DeclareLaunchArgument(
-        'use_lidar',
-        default_value='true',
-        description='Enable or disable lidar simulation'
-    )
-    use_foxglove_arg = DeclareLaunchArgument(
-        'use_foxglove',
-        default_value='true',
-        description='Enable or disable foxglove bridge'
-    )
-    record_bag_arg = DeclareLaunchArgument(
-        'record_bag',
-        default_value='false',
-        description='Enable rosbag recording'
-    )
-
     # 获取yaml路径以读取urdf文件
     mujoco_pkg_path = get_package_share_directory('mujoco_simulator_python')
     yaml_path = mujoco_pkg_path + "/config/simulate.yaml"
@@ -63,7 +46,6 @@ def generate_launch_description():
 
     # 传感器配置文件路径
     sensor_yaml_path = mujoco_pkg_path + "/config/" + model_type + "_sensor_cfg.yaml"
-    if not os.path.exists(sensor_yaml_path): raise FileNotFoundError(f"传感器配置文件未找到: {sensor_yaml_path}")
 
     # 获取foxglove的launch文件路径
     foxglove_pkg_path = get_package_share_directory('foxglove_bridge')
@@ -75,6 +57,38 @@ def generate_launch_description():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     bag_folder_path = "bags/" + f"{timestamp}"
 
+    return LaunchDescription([
+        Node(
+            package='mujoco_simulator_python',
+            executable='mujoco_simulator_python',
+            name='mujoco_simulator',
+            output='both',
+            emulate_tty=True,
+            parameters=[
+                {
+                    'yaml_path': yaml_path,
+                    'sensor_yaml_path': sensor_yaml_path,
+                    'mjcf_path': mjcf_path,
+                },
+            ]
+        ),
+        # 发布机器人状态以可视化
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name='robot_state_publisher',
+            output='both',
+            parameters=[{'robot_description': open(urdf_path).read()}]
+        ),
+        # foxglove节点
+        IncludeLaunchDescription(
+            AnyLaunchDescriptionSource(xml_launch_path),
+            launch_arguments={
+                "output": "log"  # 覆盖子文件节点的 output 属性
+            }.items()
+        ),
+    ])
+
     # 在launch文件中使用参数
     nodes = [
         Node(
@@ -85,7 +99,6 @@ def generate_launch_description():
             emulate_tty=True,
             parameters=[
                 {
-                    'use_lidar': LaunchConfiguration('use_lidar'),  # 使用launch参数
                     'yaml_path': yaml_path,
                     'sensor_yaml_path': sensor_yaml_path,
                     'mjcf_path': mjcf_path,
@@ -121,9 +134,4 @@ def generate_launch_description():
         )
     )
 
-    return LaunchDescription([
-        use_lidar_arg,
-        use_foxglove_arg,
-        record_bag_arg,
-        *nodes
-    ])
+    return LaunchDescription([*nodes])

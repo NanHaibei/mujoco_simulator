@@ -10,6 +10,7 @@ mujoco_simulator:
     # S2_20dof_simp_col
 
     modelName: "G1_29dof" 
+    # modelName: "Pegasus" 
     # modelName: "S2_20dof_simp_col" 
     
     # 电机状态与命令topic
@@ -18,7 +19,7 @@ mujoco_simulator:
 
     # 加载模型后是否暂停
     unPauseService: "/unpause_mujoco" # 启动服务名称
-    initPauseFlag: true # 1是会暂停,0是不会暂停
+    initPauseFlag: false # 1是会暂停,0是不会暂停
 
     # 是否输出模型信息表格
     modelTableFlag: true # 1是会,0是不会

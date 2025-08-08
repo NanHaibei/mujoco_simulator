@@ -3,19 +3,15 @@ import mujoco
 import time
 import rclpy
 from rclpy.node import Node
-from ament_index_python.packages import get_package_share_directory
 from mit_msgs.msg import MITLowState, MITJointCommand, MITJointCommands
-import os
 import yaml
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich import box
 from std_srvs.srv import Empty
-from rclpy.executors import MultiThreadedExecutor
 import numpy as np
 from mujoco_lidar.scan_gen import LivoxGenerator
-from mujoco_lidar.scan_gen import generate_grid_scan_pattern
 from mujoco_lidar.lidar_wrapper import MjLidarWrapper
 from sensor_msgs.msg import PointCloud2, PointField, JointState
 from std_msgs.msg import Header
@@ -46,16 +42,6 @@ class mujoco_simulator(Node):
             except yaml.YAMLError as e:
                 print(f"YAML解析失败: {e}")
 
-        # 读取传感器yaml文件
-        with open(sensor_yaml_path, 'r') as f:
-            try:
-                param = yaml.safe_load(f)  # 返回字典/列表[3](@ref)
-                print(param)
-                self.param.update(param["sensor_cfg"])
-            except yaml.YAMLError as e:
-                print(f"YAML解析失败: {e}")
-
-
         # 实例化mujoco的model和data
         self.mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
         self.mj_data = mujoco.MjData(self.mj_model)
@@ -85,7 +71,7 @@ class mujoco_simulator(Node):
             Vector3Stamped, "/sim_real_vel", 10
         )
         self.create_timer(1.0/10.0, self.show_log) # 10Hz输出log信息
-        self.create_timer(1.0/10.0, self.publish_sim_states) # 10Hz发布真值信息
+        self.create_timer(1.0/30.0, self.publish_sim_states) # 10Hz发布真值信息
         self.tf_broadcaster = TransformBroadcaster(self)  # 发布tf变换
 
         # 初始化变量
@@ -99,12 +85,17 @@ class mujoco_simulator(Node):
         self.pause = True if self.param["initPauseFlag"] else False
         self.mujoco_step_time = 0.0
 
-        # 如果使用雷达
-        if self.use_lidar:
-            # 检查是否有lidar_site
-            lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
-            if lidar_site_id <= 0:
-                raise ValueError("运行雷达仿真但是MJCF文件中未找到lidar_site")
+        # 如果mjcf中有lidar_site，则读取雷达信息
+        lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
+        if lidar_site_id > 0:
+            # 读取传感器yaml文件
+            with open(sensor_yaml_path, 'r') as f:
+                try:
+                    param = yaml.safe_load(f)  # 返回字典/列表[3](@ref)
+                    self.param.update(param["sensor_cfg"])
+                except yaml.YAMLError as e:
+                    raise ValueError(f"运行雷达仿真但是传感器配置文件{sensor_yaml_path}解析失败")
+                
             # 设置雷达类型
             livox_generator = LivoxGenerator("mid360")
             self.rays_theta, self.rays_phi = livox_generator.sample_ray_angles()
@@ -118,8 +109,7 @@ class mujoco_simulator(Node):
                     "verbose": False           # 显示详细信息（可选）
                 }
             )
-            
-            # 发布点云与坐标系
+            # 发布点云
             self.point_cloud_pub = self.create_publisher(
                 PointCloud2, "/point_cloud", 100
             )
@@ -251,7 +241,7 @@ class mujoco_simulator(Node):
         eff_cmd_list = np.array([cmd.eff for cmd in self.low_cmd_msg.commands])
         sensor_pos = np.array(self.sensor_data_list[self.joint_pos_head_id:self.joint_pos_head_id + self.mj_model.nu])
         sensor_vel = np.array(self.sensor_data_list[self.joint_vel_head_id:self.joint_vel_head_id + self.mj_model.nu])
-
+        # 根据PD控制器计算输出力矩
         data.ctrl = kp_cmd_list * (pos_cmd_list - sensor_pos) + kd_cmd_list * (vel_cmd_list - sensor_vel) + eff_cmd_list
 
     def low_cmd_callback(self, msg: MITJointCommands):
@@ -310,8 +300,8 @@ class mujoco_simulator(Node):
         self.pause = False
         # 应用第一个关键帧作为初始位
         if self.keyframe_count > 0: mujoco.mj_resetDataKeyframe(self.mj_model, self.mj_data, 0)
-
-        return response  # 返回空响应
+        # 返回空响应
+        return response  
          
     def show_model(self):
         """
