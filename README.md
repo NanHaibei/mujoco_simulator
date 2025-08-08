@@ -23,6 +23,12 @@ wget http://fishros.com/install -O fishros && . fishros
 sudo apt install ros-humble-foxglove-bridge
 ```
 
+安装mujoco-python
+
+```shell
+pip install mujoco
+```
+
 新建ros2工作空间
 
 ```shell
