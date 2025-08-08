@@ -25,14 +25,10 @@ class mujoco_simulator(Node):
         super().__init__('mujoco_simulator')
 
         # 读取launch中传来的参数
-        self.declare_parameter('use_lidar', False)  # launch文件中的参数
         self.declare_parameter('yaml_path', " ")  # launch文件中的参数
-        self.declare_parameter('sensor_yaml_path', " ")  # launch文件中的参数
         self.declare_parameter('mjcf_path', " ")  # launch文件中的参数
-        self.use_lidar = self.get_parameter('use_lidar').get_parameter_value().bool_value
         yaml_path = self.get_parameter('yaml_path').get_parameter_value().string_value
         mjcf_path = self.get_parameter('mjcf_path').get_parameter_value().string_value
-        sensor_yaml_path = self.get_parameter('sensor_yaml_path').get_parameter_value().string_value
 
         # 读取yaml文件
         with open(yaml_path, 'r') as f:
@@ -88,14 +84,9 @@ class mujoco_simulator(Node):
         # 如果mjcf中有lidar_site，则读取雷达信息
         lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
         if lidar_site_id > 0:
-            # 读取传感器yaml文件
-            with open(sensor_yaml_path, 'r') as f:
-                try:
-                    param = yaml.safe_load(f)  # 返回字典/列表[3](@ref)
-                    self.param.update(param["sensor_cfg"])
-                except yaml.YAMLError as e:
-                    raise ValueError(f"运行雷达仿真但是传感器配置文件{sensor_yaml_path}解析失败")
-                
+            # 获取传感器的位置
+            self.lidar_site_pos = self.mj_model.site_pos[lidar_site_id].copy()  # [x, y, z]
+            self.lidar_site_quat = self.mj_model.site_quat[lidar_site_id].copy() # [w, x, y, z]
             # 设置雷达类型
             livox_generator = LivoxGenerator("mid360")
             self.rays_theta, self.rays_phi = livox_generator.sample_ray_angles()
@@ -126,20 +117,19 @@ class mujoco_simulator(Node):
 
                 # 进行物理仿真，渲染画面
                 if not self.pause: mujoco.mj_step(self.mj_model, self.mj_data)
-                # mujoco.mj_step(self.mj_model, self.mj_data)
                 viewer.sync() 
 
                 # 处理ROS回调（非阻塞）
                 rclpy.spin_once(self, timeout_sec=0.0)
     
-                self.temp_time2 = time.time()
-                self.mujoco_step_time = self.temp_time2 - self.temp_time1
-
                 # 发布当前状态
                 self.publish_low_state() # 200us
 
+                self.temp_time2 = time.time()
+                self.mujoco_step_time = self.temp_time2 - self.temp_time1
+
                 # sleep 以保证仿真实时
-                time_until_next_step = self.mj_model.opt.timestep - (time.time() - self.temp_time1)
+                time_until_next_step = self.mj_model.opt.timestep - self.mujoco_step_time
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step)
 
@@ -181,7 +171,6 @@ class mujoco_simulator(Node):
             real_vel.vector.z = float(self.sensor_data_list[self.real_vel_head_id + 2])
             self.real_vel_pub.publish(real_vel)
 
-
     def lidar_callback(self):
         """获取点云信息并发布"""
 
@@ -213,13 +202,13 @@ class mujoco_simulator(Node):
         t.header.stamp = self.get_clock().now().to_msg() # 设置消息头
         t.header.frame_id = self.first_link_name # 设置父坐标系
         t.child_frame_id = 'lidar'
-        t.transform.translation.x = self.param["lidar"]["translation"]["x"] # 设置变换
-        t.transform.translation.y = self.param["lidar"]["translation"]["y"]
-        t.transform.translation.z = self.param["lidar"]["translation"]["z"]
-        t.transform.rotation.x = self.param["lidar"]["rotation"]["x"]
-        t.transform.rotation.y = self.param["lidar"]["rotation"]["y"]
-        t.transform.rotation.z = self.param["lidar"]["rotation"]["z"]
-        t.transform.rotation.w = self.param["lidar"]["rotation"]["w"]
+        t.transform.translation.x = self.lidar_site_pos[0] # 设置变换
+        t.transform.translation.y = self.lidar_site_pos[1]
+        t.transform.translation.z = self.lidar_site_pos[2]
+        t.transform.rotation.w = self.lidar_site_quat[0]
+        t.transform.rotation.x = self.lidar_site_quat[1]
+        t.transform.rotation.y = self.lidar_site_quat[2]
+        t.transform.rotation.z = self.lidar_site_quat[3]
         self.tf_broadcaster.sendTransform(t) # 发布变换
 
     def show_log(self):

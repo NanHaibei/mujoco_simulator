@@ -44,9 +44,6 @@ def generate_launch_description():
 
     if not os.path.exists(urdf_path): raise FileNotFoundError(f"URDF文件未找到: {urdf_path}") 
 
-    # 传感器配置文件路径
-    sensor_yaml_path = mujoco_pkg_path + "/config/" + model_type + "_sensor_cfg.yaml"
-
     # 获取foxglove的launch文件路径
     foxglove_pkg_path = get_package_share_directory('foxglove_bridge')
     xml_launch_path = PathJoinSubstitution([
@@ -67,7 +64,6 @@ def generate_launch_description():
             parameters=[
                 {
                     'yaml_path': yaml_path,
-                    'sensor_yaml_path': sensor_yaml_path,
                     'mjcf_path': mjcf_path,
                 },
             ]
@@ -87,51 +83,9 @@ def generate_launch_description():
                 "output": "log"  # 覆盖子文件节点的 output 属性
             }.items()
         ),
+        # 进行rosbag2录制
+        # ExecuteProcess(
+        #     cmd=['ros2', 'bag', 'record', '-o', bag_folder_path, '-a', '-s', 'mcap'],  # 录制所有话题到 my_bag 目录
+        #     output='screen'  # 显示录制日志
+        # ),
     ])
-
-    # 在launch文件中使用参数
-    nodes = [
-        Node(
-            package='mujoco_simulator_python',
-            executable='mujoco_simulator_python',
-            name='mujoco_simulator',
-            output='both',
-            emulate_tty=True,
-            parameters=[
-                {
-                    'yaml_path': yaml_path,
-                    'sensor_yaml_path': sensor_yaml_path,
-                    'mjcf_path': mjcf_path,
-                },
-            ]
-        ),
-        Node(
-            package='robot_state_publisher',
-            executable='robot_state_publisher',
-            name='robot_state_publisher',
-            output='both',
-            parameters=[{'robot_description': open(urdf_path).read()}]
-        ),
-    ]
-    
-    # 条件性启动foxglove
-    nodes.append(
-        IncludeLaunchDescription(
-            AnyLaunchDescriptionSource(xml_launch_path),
-            launch_arguments={
-                "output": "log"
-            }.items(),
-            condition=IfCondition(LaunchConfiguration('use_foxglove'))  # 条件启动
-        )
-    )
-    
-    # 条件性录制rosbag
-    nodes.append(
-        ExecuteProcess(
-            cmd=['ros2', 'bag', 'record', '-o', bag_folder_path, '-a', '-s', 'mcap'],
-            output='screen',
-            condition=IfCondition(LaunchConfiguration('record_bag'))  # 条件启动
-        )
-    )
-
-    return LaunchDescription([*nodes])

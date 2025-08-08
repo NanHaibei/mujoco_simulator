@@ -19,7 +19,7 @@ mujoco_simulator:
 
     # 加载模型后是否暂停
     unPauseService: "/unpause_mujoco" # 启动服务名称
-    initPauseFlag: false # 1是会暂停,0是不会暂停
+    initPauseFlag: true # 1是会暂停,0是不会暂停
 
     # 是否输出模型信息表格
     modelTableFlag: true # 1是会,0是不会
