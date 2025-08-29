@@ -109,6 +109,7 @@ class mujoco_simulator(Node):
     def run(self):
         """物理仿真主循环, 默认500Hz"""
         rander_count = 0
+        rander_decimation = int((1.0 / self.mj_model.opt.timestep) / 60.0)
         # 开启mujoco窗口
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
             while viewer.is_running():
@@ -118,8 +119,8 @@ class mujoco_simulator(Node):
                 # 进行物理仿真
                 if not self.pause: mujoco.mj_step(self.mj_model, self.mj_data)
 
-                # 每10个step进行一次画面渲染
-                if rander_count % 10 == 0:
+                # 间隔一定step次数进行一次画面渲染，确保60fps
+                if rander_count % rander_decimation == 0:
                     viewer.sync() 
                 rander_count += 1
 
