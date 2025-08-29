@@ -30,6 +30,8 @@ def generate_launch_description():
     model_name = yaml_config["mujoco_simulator"]["modelName"]
     if "S1" in model_name:
         model_type = "S1"
+    elif "S2_22dof" in model_name:
+        model_type = "S2_22dof"
     elif "S2" in model_name:
         model_type = "S2"
     elif "G1" in model_name:

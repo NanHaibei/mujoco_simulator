@@ -108,16 +108,20 @@ class mujoco_simulator(Node):
 
     def run(self):
         """物理仿真主循环, 默认500Hz"""
-
+        rander_count = 0
         # 开启mujoco窗口
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
             while viewer.is_running():
                 # 记录当前运行时间
                 self.temp_time1 = time.time()
 
-                # 进行物理仿真，渲染画面
+                # 进行物理仿真
                 if not self.pause: mujoco.mj_step(self.mj_model, self.mj_data)
-                viewer.sync() 
+
+                # 每10个step进行一次画面渲染
+                if rander_count % 10 == 0:
+                    viewer.sync() 
+                rander_count += 1
 
                 # 处理ROS回调（非阻塞）
                 rclpy.spin_once(self, timeout_sec=0.0)
