@@ -11,7 +11,8 @@ mujoco_simulator:
     # S2_22dof
 
     # modelName: "G1_29dof" 
-    modelName: "S2_22dof" 
+    # modelName: "S2_22dof" 
+    modelName: "L1" 
     # modelName: "Pegasus" 
     # modelName: "S2_20dof_simp_col" 
     
