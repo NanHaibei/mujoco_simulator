@@ -10,15 +10,16 @@ mujoco_simulator:
     # S2_20dof_simp_col
     # S2_22dof
 
-    # modelName: "G1_29dof" 
-    # modelName: "S2_22dof" 
-    modelName: "L1" 
+    modelName: "G1_29dof" 
+    # modelName: "S2_22dof_ball" 
+    # modelName: "S2_22dof_ball_float" 
+    # modelName: "L1" 
     # modelName: "Pegasus" 
     # modelName: "S2_20dof_simp_col" 
     
     # 电机状态与命令topic
-    lowStateTopic: "/human_lower_state" 
-    jointCommandsTopic: "/human_lower_command" 
+    lowStateTopic: "/low_state" 
+    jointCommandsTopic: "/low_command" 
 
     # 加载模型后是否暂停
     unPauseService: "/unpause_mujoco" # 启动服务名称
