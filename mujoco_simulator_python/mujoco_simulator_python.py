@@ -218,7 +218,8 @@ class mujoco_simulator(Node):
 
     def show_log(self):
         """输出日志"""
-        self.get_logger().info(f"物理仿真渲染耗时: {self.mujoco_step_time:.4f} 秒")
+        pass
+        # self.get_logger().info(f"物理仿真渲染耗时: {self.mujoco_step_time:.4f} 秒")
 
     def pd_controller(self, model, data):
         """mujoco控制回调,根据命令值计算力矩
