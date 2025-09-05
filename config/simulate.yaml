@@ -26,6 +26,6 @@ mujoco_simulator:
     initPauseFlag: false # 1是会暂停,0是不会暂停
 
     # 是否输出模型信息表格
-    modelTableFlag: true # 1是会,0是不会
+    modelTableFlag: false # 1是会,0是不会
 
     g_unit: "g" # 重力单位 可选项: g, m/s^2

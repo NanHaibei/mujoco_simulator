@@ -73,7 +73,7 @@ class mujoco_simulator(Node):
         )
         self.marker_array_pub = self.create_publisher(MarkerArray, 'visualization_marker_array', 10)
         self.create_timer(1.0/10.0, self.show_log) # 10Hz输出log信息
-        self.create_timer(1.0/30.0, self.publish_sim_states) # 10Hz发布真值信息
+        self.create_timer(1.0/60.0, self.publish_sim_states) # 60Hz发布真值信息
         self.tf_broadcaster = TransformBroadcaster(self)  # 发布tf变换
 
         # 初始化变量
@@ -265,33 +265,39 @@ class mujoco_simulator(Node):
 
     def publish_terrain(self):
         marker_array = MarkerArray()
+        id = 0
 
-        # for i, box in enumerate(boxes):  # boxes 里存放你的障碍物信息
-        #     marker = Marker()
-        #     marker.header.frame_id = "world"
-        #     marker.header.stamp = self.get_clock().now().to_msg()
-        #     marker.ns = "mujoco"
-        #     marker.id = i   # 每个 marker 必须有唯一 id
-        #     marker.type = Marker.CUBE
-        #     marker.action = Marker.ADD
+        for i in range(len(self.terrain_pos)):  # boxes 里存放你的障碍物信息
+            marker = Marker()
+            marker.header.frame_id = "world"
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = "mujoco"
+            marker.id = id   # 每个 marker 必须有唯一 id
+            id += 1
+            marker.type = Marker.CUBE
+            marker.action = Marker.ADD
 
-        #     marker.pose.position.x = box["pos"][0]
-        #     marker.pose.position.y = box["pos"][1]
-        #     marker.pose.position.z = box["pos"][2]
-        #     marker.pose.orientation.w = 1.0
+            marker.pose.position.x = self.terrain_pos[i][0]
+            marker.pose.position.y = self.terrain_pos[i][1]
+            marker.pose.position.z = self.terrain_pos[i][2]
 
-        #     marker.scale.x = box["size"][0]
-        #     marker.scale.y = box["size"][1]
-        #     marker.scale.z = box["size"][2]
+            marker.pose.orientation.w = self.terrain_quat[i][0]
+            marker.pose.orientation.x = self.terrain_quat[i][1]
+            marker.pose.orientation.y = self.terrain_quat[i][2]
+            marker.pose.orientation.z = self.terrain_quat[i][3]
 
-        #     marker.color.a = 0.8
-        #     marker.color.r = 0.1
-        #     marker.color.g = 0.8
-        #     marker.color.b = 0.1
+            marker.scale.x = self.terrain_size[i][0]
+            marker.scale.y = self.terrain_size[i][1]
+            marker.scale.z = self.terrain_size[i][2]
 
-        #     marker_array.markers.append(marker)
+            marker.color.r = float(self.terrain_rgba[i][0])
+            marker.color.g = float(self.terrain_rgba[i][1])
+            marker.color.b = float(self.terrain_rgba[i][2])
+            marker.color.a = float(self.terrain_rgba[i][3])
 
-        # self.marker_array_pub.publish(marker)
+            marker_array.markers.append(marker)
+
+        self.marker_array_pub.publish(marker_array)
 
     def publish_low_state(self):
         """发布机器人状态"""
@@ -476,6 +482,10 @@ class mujoco_simulator(Node):
         self.imu_acc_head_id = 999999
         self.real_pos_head_id = 999999
         self.real_vel_head_id = 999999
+        self.terrain_pos = [] # 记录场景中的box，目前还不支持其他的形状
+        self.terrain_size = []
+        self.terrain_quat = []
+        self.terrain_rgba = []
         # 读取模型名称
         self.model_name = self.mj_model.names.split(b'\x00', 1)[0].decode('utf-8')
         # 读取加载的模型时间步长
@@ -572,10 +582,10 @@ class mujoco_simulator(Node):
         for geom_id in range(self.mj_model.ngeom):
             geom_type = self.mj_model.geom_type[geom_id]
             if geom_type == mujoco.mjtGeom.mjGEOM_BOX:
-                pos = self.mj_data.geom_xpos[geom_id].copy()
-                mat = self.mj_data.geom_xmat[geom_id].reshape(3, 3).copy()
-                size = self.mj_model.geom_size[geom_id].copy() * 2  # box 的长宽高
-                print(f"Box {geom_id}: pos={pos}, size={size}")
+                self.terrain_pos.append(self.mj_model.geom_pos[geom_id].copy())
+                self.terrain_quat.append(self.mj_model.geom_quat[geom_id].copy())
+                self.terrain_size.append(self.mj_model.geom_size[geom_id].copy() * 2) # mjcf中是半尺寸，这里改为全尺寸
+                self.terrain_rgba.append(self.mj_model.geom_rgba[geom_id].copy())
 
 def main(args=None):
     rclpy.init(args=args)
