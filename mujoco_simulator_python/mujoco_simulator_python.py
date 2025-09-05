@@ -4,6 +4,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from mit_msgs.msg import MITLowState, MITJointCommand, MITJointCommands
+from sensor_msgs.msg import Imu
 import yaml
 from rich.console import Console
 from rich.table import Table
@@ -17,6 +18,7 @@ from sensor_msgs.msg import PointCloud2, PointField, JointState
 from std_msgs.msg import Header
 from geometry_msgs.msg import TransformStamped, Vector3Stamped
 from tf2_ros import TransformBroadcaster
+from visualization_msgs.msg import Marker, MarkerArray
 
 
 class mujoco_simulator(Node):
@@ -66,6 +68,10 @@ class mujoco_simulator(Node):
         self.real_vel_pub = self.create_publisher( # 发布线速度真值
             Vector3Stamped, "/sim_real_vel", 10
         )
+        self.imu_pub = self.create_publisher( # 发布电机与IMU信息
+            Imu, "/imu", 10
+        )
+        self.marker_array_pub = self.create_publisher(MarkerArray, 'visualization_marker_array', 10)
         self.create_timer(1.0/10.0, self.show_log) # 10Hz输出log信息
         self.create_timer(1.0/30.0, self.publish_sim_states) # 10Hz发布真值信息
         self.tf_broadcaster = TransformBroadcaster(self)  # 发布tf变换
@@ -100,7 +106,7 @@ class mujoco_simulator(Node):
                     "verbose": False           # 显示详细信息（可选）
                 }
             )
-            # 发布点云
+            # 点云发布者
             self.point_cloud_pub = self.create_publisher(
                 PointCloud2, "/point_cloud", 100
             )
@@ -142,6 +148,9 @@ class mujoco_simulator(Node):
         """发布关节状态和世界坐标信息"""
         # 如果模型读取有错误，则不执行操作
         if self.read_error_flag: return
+
+        # 发布地形信息
+        self.publish_terrain()
             
         # 发布关节信息
         joint_state = JointState()
@@ -254,6 +263,36 @@ class mujoco_simulator(Node):
         # 将命令值保存到成员变量
         self.low_cmd_msg = msg
 
+    def publish_terrain(self):
+        marker_array = MarkerArray()
+
+        # for i, box in enumerate(boxes):  # boxes 里存放你的障碍物信息
+        #     marker = Marker()
+        #     marker.header.frame_id = "world"
+        #     marker.header.stamp = self.get_clock().now().to_msg()
+        #     marker.ns = "mujoco"
+        #     marker.id = i   # 每个 marker 必须有唯一 id
+        #     marker.type = Marker.CUBE
+        #     marker.action = Marker.ADD
+
+        #     marker.pose.position.x = box["pos"][0]
+        #     marker.pose.position.y = box["pos"][1]
+        #     marker.pose.position.z = box["pos"][2]
+        #     marker.pose.orientation.w = 1.0
+
+        #     marker.scale.x = box["size"][0]
+        #     marker.scale.y = box["size"][1]
+        #     marker.scale.z = box["size"][2]
+
+        #     marker.color.a = 0.8
+        #     marker.color.r = 0.1
+        #     marker.color.g = 0.8
+        #     marker.color.b = 0.1
+
+        #     marker_array.markers.append(marker)
+
+        # self.marker_array_pub.publish(marker)
+
     def publish_low_state(self):
         """发布机器人状态"""
 
@@ -286,6 +325,37 @@ class mujoco_simulator(Node):
 
         # 发布当前状态
         self.lowState_pub.publish(self.low_state_msg)
+
+        # 单独发布imu数据给感知用
+        imu_data_msg = self.low_state_msg.imu
+        imu_data_msg.header.frame_id = "imu_frame"
+        imu_data_msg.header.stamp = self.get_clock().now().to_msg()
+        if self.param["g_unit"] == "g":
+            imu_data_msg.linear_acceleration.x /= 9.80665
+            imu_data_msg.linear_acceleration.y /= 9.80665
+            imu_data_msg.linear_acceleration.z /= 9.80665
+        elif self.param["g_unit"] == "m/s^2":
+            pass
+        else:
+            self.get_logger().error(f"未知的重力单位: {self.param['g_unit']}, 请检查参数设置")
+            return
+        self.imu_pub.publish(imu_data_msg)
+        # ======================= 关键补充：发布IMU的TF变换 =======================
+        # 这个变换告诉系统 "imu_frame" 在机器人上的确切位置
+        imu_transform = TransformStamped()
+        imu_transform.header.stamp = self.get_clock().now().to_msg()
+        imu_transform.header.frame_id = self.first_link_name  # 父坐标系：机器人基座
+        imu_transform.child_frame_id = "imu_frame"            # 子坐标系：IMU
+        # IMU在机器人中心，所以平移为0，旋转为单位四元数
+        imu_transform.transform.translation.x = 0.0
+        imu_transform.transform.translation.y = 0.0
+        imu_transform.transform.translation.z = 0.0
+        imu_transform.transform.rotation.w = 1.0
+        imu_transform.transform.rotation.x = 0.0
+        imu_transform.transform.rotation.y = 0.0
+        imu_transform.transform.rotation.z = 0.0
+        self.tf_broadcaster.sendTransform(imu_transform)
+        # ====================================================================
 
     def unpause_callback(self, request, response):
         """仿真启动回调"""
@@ -496,6 +566,16 @@ class mujoco_simulator(Node):
                 temp_type = "unknown"
             temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, self.mj_model.sensor_objid[i])
             self.sensor_type.append([temp_name, temp_type, temp_attch])
+        
+        # 读取所有的box障碍物
+        
+        for geom_id in range(self.mj_model.ngeom):
+            geom_type = self.mj_model.geom_type[geom_id]
+            if geom_type == mujoco.mjtGeom.mjGEOM_BOX:
+                pos = self.mj_data.geom_xpos[geom_id].copy()
+                mat = self.mj_data.geom_xmat[geom_id].reshape(3, 3).copy()
+                size = self.mj_model.geom_size[geom_id].copy() * 2  # box 的长宽高
+                print(f"Box {geom_id}: pos={pos}, size={size}")
 
 def main(args=None):
     rclpy.init(args=args)

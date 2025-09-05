@@ -10,11 +10,11 @@ mujoco_simulator:
     # S2_20dof_simp_col
     # S2_22dof
 
-    # modelName: "G1_29dof" 
+    modelName: "G1_29dof" 
     # modelName: "S2_22dof_ball" 
     # modelName: "S2_22dof_ball_float" 
     # modelName: "L1" 
-    modelName: "Pegasus" 
+    # modelName: "Pegasus" 
     # modelName: "S2_20dof_simp_col" 
     
     # 电机状态与命令topic
@@ -27,3 +27,5 @@ mujoco_simulator:
 
     # 是否输出模型信息表格
     modelTableFlag: true # 1是会,0是不会
+
+    g_unit: "g" # 重力单位 可选项: g, m/s^2
