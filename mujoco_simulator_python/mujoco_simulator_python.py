@@ -17,8 +17,10 @@ from mujoco_lidar.lidar_wrapper import MjLidarWrapper
 from sensor_msgs.msg import PointCloud2, PointField, JointState
 from std_msgs.msg import Header
 from geometry_msgs.msg import TransformStamped, Vector3Stamped
-from tf2_ros import TransformBroadcaster
+from tf2_ros import TransformBroadcaster, Buffer, TransformListener
+from tf2_msgs.msg import TFMessage
 from visualization_msgs.msg import Marker, MarkerArray
+from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 
 
 class mujoco_simulator(Node):
@@ -71,7 +73,12 @@ class mujoco_simulator(Node):
         self.imu_pub = self.create_publisher( # 发布电机与IMU信息
             Imu, "/imu", 10
         )
-        self.marker_array_pub = self.create_publisher(MarkerArray, 'visualization_marker_array', 10)
+        self.marker_array_pub = self.create_publisher( # 发布障碍信息
+            MarkerArray, '/visualization_marker_array', 10
+        )
+        self.tf_sub = self.create_subscription( # 订阅tf信息
+            TFMessage, '/tf_static', self.map_tf_callback, 10
+        )
         self.create_timer(1.0/10.0, self.show_log) # 10Hz输出log信息
         self.create_timer(1.0/60.0, self.publish_sim_states) # 60Hz发布真值信息
         self.tf_broadcaster = TransformBroadcaster(self)  # 发布tf变换
@@ -86,6 +93,7 @@ class mujoco_simulator(Node):
         self.read_error_flag = False  # 传感器读取错误标志
         self.pause = True if self.param["initPauseFlag"] else False
         self.mujoco_step_time = 0.0
+        self.map_triggered = False
 
         # 如果mjcf中有lidar_site，则读取雷达信息
         lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
@@ -298,6 +306,41 @@ class mujoco_simulator(Node):
             marker_array.markers.append(marker)
 
         self.marker_array_pub.publish(marker_array)
+
+    def map_tf_callback(self, msg: TFMessage):
+        if self.map_triggered:
+            return
+        
+        for transform in msg.transforms:
+            child = transform.child_frame_id
+
+            # print(transform)
+            if child == "odom":
+                self.get_logger().info(f"第一次收到 {child} 的 tf，执行函数！")
+                self.broadcaster = StaticTransformBroadcaster(self)
+
+                # 定义一个静态变换
+                t = TransformStamped()
+                t.header.stamp = self.get_clock().now().to_msg()
+                t.header.frame_id = 'world'        # 父坐标系
+                t.child_frame_id = 'map'   # 子坐标系
+
+                # 平移 (x, y, z)
+                t.transform.translation.x = float(self.sensor_data_list[self.real_pos_head_id + 0])
+                t.transform.translation.y = float(self.sensor_data_list[self.real_pos_head_id + 1])
+                t.transform.translation.z = 0.0
+
+                # 四元数 (w, x, y, z)
+                t.transform.rotation.w = float(self.sensor_data_list[self.imu_quat_head_id + 0])
+                t.transform.rotation.x = float(self.sensor_data_list[self.imu_quat_head_id + 1])
+                t.transform.rotation.y = float(self.sensor_data_list[self.imu_quat_head_id + 2])
+                t.transform.rotation.z = float(self.sensor_data_list[self.imu_quat_head_id + 3])
+
+                # 发布一次即可
+                self.broadcaster.sendTransform(t)
+                self.get_logger().info("发布了静态坐标变换 world -> camera_link")
+                self.map_triggered = True
+                break
 
     def publish_low_state(self):
         """发布机器人状态"""

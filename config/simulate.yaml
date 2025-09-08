@@ -11,6 +11,8 @@ mujoco_simulator:
     # S2_22dof
 
     modelName: "G1_29dof" 
+    # modelName: "G1_29dof_float" 
+    # modelName: "G1_26dof" 
     # modelName: "S2_22dof_ball" 
     # modelName: "S2_22dof_ball_float" 
     # modelName: "L1" 
