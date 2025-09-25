@@ -4,8 +4,8 @@ import cv2
 import noise
 
 ROBOT = "go2"
-INPUT_SCENE_PATH = "/home/nanhaibei/project/rl_das/src/rl_das/robot_description/G1/mjcf/scene_G1_29dof.xml"
-OUTPUT_SCENE_PATH = "/home/nanhaibei/project/rl_das/src/rl_das/robot_description/G1/mjcf/scene_G1_29dof_terrain.xml"
+INPUT_SCENE_PATH = "/home/coral-jyz/project/rl_das_ws/src/robot_description/G1/mjcf/scene_G1_12dof_box_foot.xml"
+OUTPUT_SCENE_PATH = "/home/coral-jyz/project/rl_das_ws/src/robot_description/G1/mjcf/scene_G1_12dof_box_foot_terrain.xml"
 
 
 # zyx euler angle to quaternion
@@ -273,10 +273,10 @@ if __name__ == "__main__":
     #           size=[3, 1.5, 0.1])
 
     # Stairs
-    tg.AddStairs(init_pos=[1.0, -1.0, 0.0], yaw=0.0)
+    tg.AddStairs(init_pos=[1.0, -1.0, 0.0], yaw=0.0, width=0.4, height=0.12, length=1.5, stair_nums=10)
 
     # Suspend stairs
-    tg.AddSuspendStairs(init_pos=[1.0, 1.0, 0.0], yaw=0.0)
+    # tg.AddSuspendStairs(init_pos=[1.0, 1.0, 0.0], yaw=0.0)
 
     # Rough ground
     # tg.AddRoughGround(init_pos=[-2.5, 5.0, 0.0],

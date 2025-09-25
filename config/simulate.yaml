@@ -10,24 +10,40 @@ mujoco_simulator:
     # S2_20dof_simp_col
     # S2_22dof
 
-    modelName: "G1_29dof" 
+    # modelName: "G1_29dof" 
     # modelName: "G1_29dof_float" 
-    # modelName: "G1_26dof" 
-    # modelName: "S2_22dof_ball" 
+    modelName: "G1_12dof_box_foot" 
+    # modelName: "S3_22dof_ball" 
+    # modelName: "S3_12dof_ball" 
     # modelName: "S2_22dof_ball_float" 
     # modelName: "L1" 
-    # modelName: "Pegasus" 
+    # modelName: "Pegasus2" 
     # modelName: "S2_20dof_simp_col" 
     
     # 电机状态与命令topic
     lowStateTopic: "/low_state" 
     jointCommandsTopic: "/low_command" 
 
+    # 命令延迟
+    cmdDelay: 5 # 单位是ms,0是没有延迟
+
     # 加载模型后是否暂停
     unPauseService: "/unpause_mujoco" # 启动服务名称
     initPauseFlag: false # 1是会暂停,0是不会暂停
 
     # 是否输出模型信息表格
-    modelTableFlag: false # 1是会,0是不会
+    modelTableFlag: true # 1是会,0是不会
 
     g_unit: "g" # 重力单位 可选项: g, m/s^2
+
+    pointCloudType: "PointCloud2" # 可选项: PointCloud2, CustomMsg
+
+    elevation_map:
+      enabled: True                                           # 设置为 true 来启用此功能
+      topic: "/mujoco_elevation_map"                          # 高程图发布的话题
+      frame_id: "world"                                       # 高程图的参考坐标系
+      robot_base_footprint_frame_id: "robot_base_footprint"   # 机器人正下方投影坐标系名称
+      size: [ 0.9, 0.6 ]                                      # [长, 宽] (米), 对应机器人的前后和左右
+      resolution: 0.1                                         # 分辨率 (米/格)
+      update_rate: 60.0                                       # 更新频率 (Hz)
+      debug_info: false                                        # 是否发布调试信息

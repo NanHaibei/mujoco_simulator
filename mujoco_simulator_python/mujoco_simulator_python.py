@@ -4,7 +4,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from mit_msgs.msg import MITLowState, MITJointCommand, MITJointCommands
-from sensor_msgs.msg import Imu
+from geometry_msgs.msg import Pose, Twist
 import yaml
 from rich.console import Console
 from rich.table import Table
@@ -14,13 +14,22 @@ from std_srvs.srv import Empty
 import numpy as np
 from mujoco_lidar.scan_gen import LivoxGenerator
 from mujoco_lidar.lidar_wrapper import MjLidarWrapper
-from sensor_msgs.msg import PointCloud2, PointField, JointState
+from sensor_msgs.msg import PointCloud2, PointField, JointState, Imu
 from std_msgs.msg import Header
 from geometry_msgs.msg import TransformStamped, Vector3Stamped
 from tf2_ros import TransformBroadcaster, Buffer, TransformListener
 from tf2_msgs.msg import TFMessage
 from visualization_msgs.msg import Marker, MarkerArray
 from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
+from tf2_ros import TransformBroadcaster
+import math
+from grid_map_msgs.msg import GridMap
+from std_msgs.msg import Float32MultiArray
+from tf2_ros import Buffer, TransformListener
+from scipy.spatial.transform import Rotation as R
+from std_msgs.msg import MultiArrayLayout, MultiArrayDimension
+from rosgraph_msgs.msg import Clock
+from .mujoco_RayCaster import RayCaster
 
 
 class mujoco_simulator(Node):
@@ -95,6 +104,45 @@ class mujoco_simulator(Node):
         self.mujoco_step_time = 0.0
         self.map_triggered = False
 
+        # ==================== 实现 Height Scan 功能 ====================
+        # self.elevation_map_params = self.param.get("elevation_map", {})
+        # self.map_enabled = self.elevation_map_params.get("enabled", False)
+        if self.param["elevation_map"]["enabled"]:
+            self.get_logger().info("Height Scan (高程图) 功能已启用。")
+            
+            # 读取具体参数
+            # self.map_topic = self.elevation_map_params.get("topic", "/mujoco_elevation_map")
+            self.map_topic = self.param["elevation_map"]["topic"]
+            # self.map_frame = self.elevation_map_params.get("frame_id", "world")
+            self.robot_base_footprint_frame = self.param["elevation_map"]["robot_base_footprint_frame_id"]
+            # self.robot_base_frame = self.first_link_name  # 使用 read_model() 中获取的机器人基座名
+            self.map_size = self.param["elevation_map"]["size"]
+            self.map_resolution = self.param["elevation_map"]["resolution"]
+            self.elevation_map_debug = self.param["elevation_map"]["debug_info"]
+            self.robot_base_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.first_link_name)
+            update_rate = self.param["elevation_map"]["update_rate"]
+            self.raycaster = RayCaster(
+                self.mj_data,
+                self.mj_model,
+                offset_pos=(0.0, 0.0, 0.0),  # 相对于机器人基座的偏移位置
+                offset_rot=(0.0, 0.0, 0.0, 1.0),  # 相对于机器人基座的偏移旋转（四元数）
+                resolution=0.1,
+                size=(0.8,0.5),
+                debug_vis=True
+            )
+
+            
+            # 计算网格维度
+            self.grid_size_x = round(self.map_size[0] / self.map_resolution)
+            self.grid_size_y = round(self.map_size[1] / self.map_resolution)
+            # self.grid_map_pub = self.create_publisher(GridMap, self.map_topic, 100)
+            self.elevation_sample_point = np.zeros((self.grid_size_x * self.grid_size_y, 3), dtype=np.float32)
+            self.map_timer = self.create_timer(1.0 / update_rate, self.generate_and_publish_elevation_map)
+            # 创建 TF 监听器以获取机器人实时位姿
+            # self.tf_buffer = Buffer()
+            # self.tf_listener = TransformListener(self.tf_buffer, self)
+        # ==================== 实现 Height Scan 功能 ====================
+
         # 如果mjcf中有lidar_site，则读取雷达信息
         lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
         if lidar_site_id > 0:
@@ -130,9 +178,23 @@ class mujoco_simulator(Node):
                 # 记录当前运行时间
                 self.temp_time1 = time.time()
 
+                
+                viewer.user_scn.ngeom = self.mj_model.ngeom  # 重置几何体数量，避免重复添加
+                # 初始化新添加的几何体（这里是一个小球）
+                for i in range(self.raycaster.num_x_points * self.raycaster.num_y_points):
+                    # 增加场景中的几何体数量
+                    viewer.user_scn.ngeom += 1
+                    mujoco.mjv_initGeom(
+                        viewer.user_scn.geoms[viewer.user_scn.ngeom - 1],  # 获取最后一个几何体的索引
+                        type=mujoco.mjtGeom.mjGEOM_SPHERE,                 # 几何体类型为球体
+                        size=[0.02, 0, 0],                                 # 小球半径，后两个参数忽略
+                        pos=self.elevation_sample_point[i],                                 # 小球的位置
+                        mat=np.eye(3).flatten(),                           # 朝向矩阵（单位矩阵表示无旋转）
+                        rgba=[1.0, 0.0, 0.0, 1.0]                         # 颜色和透明度（红色不透明）
+                    )
+
                 # 进行物理仿真
                 if not self.pause: mujoco.mj_step(self.mj_model, self.mj_data)
-
                 # 间隔一定step次数进行一次画面渲染，确保60fps
                 if rander_count % rander_decimation == 0:
                     viewer.sync() 
@@ -182,6 +244,28 @@ class mujoco_simulator(Node):
         transform.transform.rotation.y = float(self.sensor_data_list[self.imu_quat_head_id + 2])
         transform.transform.rotation.z = float(self.sensor_data_list[self.imu_quat_head_id + 3])
         self.tf_broadcaster.sendTransform(transform)
+
+        # robot_base_footprint
+        robot_pos = self.mj_data.xpos[self.robot_base_id]  # 位置 [x, y, z]
+        robot_quat = self.mj_data.xquat[self.robot_base_id]  # 四元数 [w, x, y, z]
+        full_rotation = R.from_quat([robot_quat[1], robot_quat[2], robot_quat[3], robot_quat[0]])
+        euler_angles = full_rotation.as_euler('xyz', degrees=False)
+        yaw_angle = euler_angles[2]
+        yaw_only_rotation = R.from_euler('z', yaw_angle, degrees=False)
+        quat_yaw_only = yaw_only_rotation.as_quat()
+        # --- 修改結束 ---
+        footprint_transform = TransformStamped()
+        footprint_transform.header.stamp = self.get_clock().now().to_msg()
+        footprint_transform.header.frame_id = "world"
+        footprint_transform.child_frame_id = self.robot_base_footprint_frame
+        footprint_transform.transform.translation.x = float(robot_pos[0]) #
+        footprint_transform.transform.translation.y = float(robot_pos[1]) #
+        footprint_transform.transform.translation.z = 0.0 #
+        footprint_transform.transform.rotation.w = float(quat_yaw_only[3])  # w
+        footprint_transform.transform.rotation.x = float(quat_yaw_only[0])  # x
+        footprint_transform.transform.rotation.y = float(quat_yaw_only[1])  # y
+        footprint_transform.transform.rotation.z = float(quat_yaw_only[2])  # z
+        self.tf_broadcaster.sendTransform(footprint_transform)
         
         # 发布实际速度信息
         if self.real_vel_head_id != 999999:  # 检查是否有实际速度传感器
@@ -199,6 +283,8 @@ class mujoco_simulator(Node):
         # 获取点云信息
         self.lidar_sim.update_scene(self.mj_model, self.mj_data)
         points = self.lidar_sim.get_lidar_points(self.rays_phi, self.rays_theta, self.mj_data)
+
+        time_stamp = self.get_clock().now().to_msg()
         
         # 设置并发布点云信息
         point_cloud_msg = PointCloud2()
@@ -209,7 +295,7 @@ class mujoco_simulator(Node):
             PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
             PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1)
         ]
-        point_cloud_msg.header.stamp = self.get_clock().now().to_msg()
+        point_cloud_msg.header.stamp = time_stamp
         point_cloud_msg.is_bigendian = False
         point_cloud_msg.point_step = 12  # 每个点12字节 (3个float32 * 4字节)
         point_cloud_msg.row_step = point_cloud_msg.point_step * len(points)
@@ -221,7 +307,7 @@ class mujoco_simulator(Node):
 
         # 点云相对于base_link的坐标转换
         t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg() # 设置消息头
+        t.header.stamp = time_stamp # 设置消息头
         t.header.frame_id = self.first_link_name # 设置父坐标系
         t.child_frame_id = 'lidar'
         t.transform.translation.x = self.lidar_site_pos[0] # 设置变换
@@ -232,6 +318,37 @@ class mujoco_simulator(Node):
         t.transform.rotation.y = self.lidar_site_quat[2]
         t.transform.rotation.z = self.lidar_site_quat[3]
         self.tf_broadcaster.sendTransform(t) # 发布变换
+
+        # 单独发布imu数据给感知用
+        imu_data_msg = self.low_state_msg.imu
+        imu_data_msg.header.frame_id = "imu_frame"
+        imu_data_msg.header.stamp = time_stamp
+        if self.param["g_unit"] == "g":
+            imu_data_msg.linear_acceleration.x /= 9.80665
+            imu_data_msg.linear_acceleration.y /= 9.80665
+            imu_data_msg.linear_acceleration.z /= 9.80665
+        elif self.param["g_unit"] == "m/s^2":
+            pass
+        else:
+            self.get_logger().error(f"未知的重力单位: {self.param['g_unit']}, 请检查参数设置")
+            return
+        self.imu_pub.publish(imu_data_msg)
+        # ======================= 关键补充：发布IMU的TF变换 =======================
+        # 这个变换告诉系统 "imu_frame" 在机器人上的确切位置
+        imu_transform = TransformStamped()
+        imu_transform.header.stamp = time_stamp
+        imu_transform.header.frame_id = self.first_link_name  # 父坐标系：机器人基座
+        imu_transform.child_frame_id = "imu_frame"            # 子坐标系：IMU
+        # IMU在机器人中心，所以平移为0，旋转为单位四元数
+        imu_transform.transform.translation.x = 0.0
+        imu_transform.transform.translation.y = 0.0
+        imu_transform.transform.translation.z = 0.0
+        imu_transform.transform.rotation.w = 1.0
+        imu_transform.transform.rotation.x = 0.0
+        imu_transform.transform.rotation.y = 0.0
+        imu_transform.transform.rotation.z = 0.0
+        self.tf_broadcaster.sendTransform(imu_transform)
+        # ====================================================================
 
     def show_log(self):
         """输出日志"""
@@ -375,36 +492,92 @@ class mujoco_simulator(Node):
         # 发布当前状态
         self.lowState_pub.publish(self.low_state_msg)
 
-        # 单独发布imu数据给感知用
-        imu_data_msg = self.low_state_msg.imu
-        imu_data_msg.header.frame_id = "imu_frame"
-        imu_data_msg.header.stamp = self.get_clock().now().to_msg()
-        if self.param["g_unit"] == "g":
-            imu_data_msg.linear_acceleration.x /= 9.80665
-            imu_data_msg.linear_acceleration.y /= 9.80665
-            imu_data_msg.linear_acceleration.z /= 9.80665
-        elif self.param["g_unit"] == "m/s^2":
-            pass
-        else:
-            self.get_logger().error(f"未知的重力单位: {self.param['g_unit']}, 请检查参数设置")
-            return
-        self.imu_pub.publish(imu_data_msg)
-        # ======================= 关键补充：发布IMU的TF变换 =======================
-        # 这个变换告诉系统 "imu_frame" 在机器人上的确切位置
-        imu_transform = TransformStamped()
-        imu_transform.header.stamp = self.get_clock().now().to_msg()
-        imu_transform.header.frame_id = self.first_link_name  # 父坐标系：机器人基座
-        imu_transform.child_frame_id = "imu_frame"            # 子坐标系：IMU
-        # IMU在机器人中心，所以平移为0，旋转为单位四元数
-        imu_transform.transform.translation.x = 0.0
-        imu_transform.transform.translation.y = 0.0
-        imu_transform.transform.translation.z = 0.0
-        imu_transform.transform.rotation.w = 1.0
-        imu_transform.transform.rotation.x = 0.0
-        imu_transform.transform.rotation.y = 0.0
-        imu_transform.transform.rotation.z = 0.0
-        self.tf_broadcaster.sendTransform(imu_transform)
-        # ====================================================================
+    def generate_and_publish_elevation_map(self):
+        """
+        通过循环调用 MuJoCo 射线投射功能，并直接从 mj_data 读取机器人位姿，生成并发布高程图。
+        """
+        # 读取pelvis的pos和quat
+        robot_pos = self.mj_data.xpos[self.robot_base_id]  # 位置 [x, y, z]
+        robot_quat = self.mj_data.xquat[self.robot_base_id]  # 四元数 [w, x, y, z]
+
+        self.elevation_sample_point = self.raycaster.update_elevation_data(robot_pos,robot_quat)
+
+        print(self.elevation_sample_point[:,2])
+        
+        # r = R.from_quat([robot_quat[1], robot_quat[2], robot_quat[3], robot_quat[0]])
+        # yaw = r.as_euler('xyz', degrees=False)[2]
+
+        # elevation_data = np.full((self.grid_size_x, self.grid_size_y), -1.0, dtype=np.float32)
+        # cos_yaw = math.cos(yaw)
+        # sin_yaw = math.sin(yaw)
+
+        # # 用于存放射线检测（raycast）命中的几何体（geom）ID 的占位数组
+        # geomid_placeholder = np.array([-1], dtype=np.int32)
+
+        # for i in range(self.grid_size_x):
+        #     for j in range(self.grid_size_y):
+        #         px_robot = (self.grid_size_x / 2.0 - i) * self.map_resolution
+        #         py_robot = (self.grid_size_y / 2.0 - j) * self.map_resolution
+        #         px_world = robot_pos[0] + px_robot * cos_yaw - py_robot * sin_yaw
+        #         py_world = robot_pos[1] + px_robot * sin_yaw + py_robot * cos_yaw
+        #         # 固定机器人正上方离地3m，发射一条垂直向下的射线
+        #         ray_start = np.array([px_world, py_world, 3.0], dtype=np.float64).reshape(3, 1)
+        #         ray_dir = np.array([0, 0, -1.0], dtype=np.float64).reshape(3, 1)
+
+        #         # 屏蔽掉机器人
+        #         # G1的gemo全部设置成group(1)，group(0)是默认,group(2)是地形相关的
+        #         # 对应顺序geomgroup = (group(0), group(1), group(2), group(3), group(4), group(5))
+        #         geomgroup = (False, False, True, False, False, False)
+        #         hit_dist = mujoco.mj_ray(self.mj_data.model, self.mj_data, ray_start, ray_dir,
+        #                                  geomgroup, 1, -1, geomid_placeholder)
+
+        #         if hit_dist > 0:
+        #             height = ray_start[2] - hit_dist
+        #             elevation_data[i, j] = height
+
+        # # 打印高层图数据
+        # if self.elevation_map_debug:
+        #     print("--- 高程图数据 ---")
+        #     # 遍历每一行并格式化打印
+        #     for i, row in enumerate(elevation_data):
+        #         # 将行内每个浮点数格式化为保留两位的字符串，并用空格连接
+        #         row_str = " ".join([f"{val:6.2f}" for val in row])
+        #         print(f"第 {i:02d} 行: {row_str}")
+        #     print("--------------------")
+        #     print("--------------------")
+
+        # 创建并填充 GridMap 消息
+        # grid_map_msg = GridMap()
+        # grid_map_msg.header.stamp = self.get_clock().now().to_msg()
+        # grid_map_msg.header.frame_id = "robot_base_footprint"
+        # grid_map_msg.info.resolution = self.map_resolution
+        # grid_map_msg.info.length_x = self.map_size[0]
+        # grid_map_msg.info.length_y = self.map_size[1]
+        # grid_map_msg.info.pose.position.x = robot_pos[0]
+        # grid_map_msg.info.pose.position.y = robot_pos[1]
+        # grid_map_msg.info.pose.position.z = 0.0
+        # grid_map_msg.layers = ['elevation']
+
+        # # 填充 elevation_layer 的 layout
+        # elevation_layer = Float32MultiArray()
+        # layout = MultiArrayLayout()
+        # # 维度0 (行)
+        # dim_row = MultiArrayDimension()
+        # dim_row.label = "row"
+        # dim_row.size = self.grid_size_x
+        # dim_row.stride = self.grid_size_x * self.grid_size_y
+        # layout.dim.append(dim_row)
+        # # 维度1 (列)
+        # dim_col = MultiArrayDimension()
+        # dim_col.label = "column"
+        # dim_col.size = self.grid_size_y
+        # dim_col.stride = self.grid_size_y
+        # layout.dim.append(dim_col)
+        # layout.data_offset = 0
+        # elevation_layer.layout = layout
+        # elevation_layer.data = elevation_data.flatten(order='F').tolist()
+        # grid_map_msg.data.append(elevation_layer)
+        # self.grid_map_pub.publish(grid_map_msg)
 
     def unpause_callback(self, request, response):
         """仿真启动回调"""
@@ -637,3 +810,5 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+
+
