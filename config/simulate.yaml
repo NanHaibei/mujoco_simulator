@@ -41,9 +41,7 @@ mujoco_simulator:
     elevation_map:
       enabled: True                                           # 设置为 true 来启用此功能
       topic: "/mujoco_elevation_map"                          # 高程图发布的话题
-      frame_id: "world"                                       # 高程图的参考坐标系
-      robot_base_footprint_frame_id: "robot_base_footprint"   # 机器人正下方投影坐标系名称
-      size: [ 0.9, 0.6 ]                                      # [长, 宽] (米), 对应机器人的前后和左右
+      size: [ 0.8, 0.5 ]                                      # [长, 宽] (米), 对应机器人的前后和左右
       resolution: 0.1                                         # 分辨率 (米/格)
       update_rate: 60.0                                       # 更新频率 (Hz)
       debug_info: false                                        # 是否发布调试信息

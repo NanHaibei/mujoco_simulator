@@ -7,74 +7,71 @@ class RayCaster:
             self, 
             mj_data,
             mj_model,
-            offset_pos: tuple[float, float, float], 
-            offset_rot: tuple[float, float, float, float], 
+            robot_base_id: int,
+            pos_offset: tuple[float, float, float], 
+            yaw_offset: float, 
             resolution: float, 
             size: tuple[float, float], 
-            debug_vis: bool
     ):
+        """射线传感器
+
+        Args:
+            mj_data (_type_): mujoco数据句柄
+            mj_model (_type_): mujoco模型句柄
+            robot_base_id (int): 机器人基座在mj_model中的id,高程图基于该基座坐标系获取
+            pos_offset (tuple[float, float, float]): 高程图采样点相对于机器人基座的偏移位置
+            yaw_offset (float): 高程图采样点相对于机器人基座的偏航角
+            resolution (float): 高程图的分辨率
+            size (tuple[float, float]): 高程图的大小
+        """
+        
         self.mj_data = mj_data
         self.mj_model = mj_model
-        self.offset_pos = offset_pos
-        self.offset_rot = offset_rot
+        self.robot_base_id = robot_base_id
+        self.offset_pos = pos_offset
+        self.offset_rot = yaw_offset
         self.resolution = resolution
         self.size = size
-        self.debug_vis = debug_vis
 
         # 计算长宽点数
         self.num_x_points = round(self.size[0] / self.resolution) + 1
         self.num_y_points = round(self.size[1] / self.resolution) + 1
-
-        self._data = np.zeros((self.num_x_points * self.num_y_points, 3), dtype=np.float32) - 1  # 初始化为-1，表示无效值
-
-    @property
-    def data(self):
-        # update sensors if needed
-        # self._update_elevation_data()
-        # return the data
-        return self._data
-    
-    def update_elevation_data(self, robot_pos, robot_rot):
-
+        # 初始化高程图数组，-1表示无效值
+        self._data = np.zeros((self.num_x_points * self.num_y_points, 3), dtype=np.float32) - 1  
         # 生成机器人坐标系下，x和y轴的采样点
-        x_sample_points = np.linspace(-self.size[0]/2, self.size[0]/2, self.num_x_points)
-        y_sample_points = np.linspace(-self.size[1]/2, self.size[1]/2, self.num_y_points)
+        self.x_sample_points = np.linspace(-self.size[0]/2, self.size[0]/2, self.num_x_points)
+        self.y_sample_points = np.linspace(-self.size[1]/2, self.size[1]/2, self.num_y_points)
+        # 设置射线探测的碰撞组
+        self.geomgroup = (False, False, True, False, False, False)
+    
+    def update_elevation_data(self):
 
-        # print(x_sample_points, y_sample_points)
+        # 读取base link的pos和quat
+        robot_pos = self.mj_data.xpos[self.robot_base_id]  # 位置 [x, y, z]
+        robot_rot = self.mj_data.xquat[self.robot_base_id]  # 四元数 [w, x, y, z]
 
         # 计算世界坐标系下采样矩阵的坐标
-        world_coords, original_shape = self._transform_points_to_world_yaw_only(
-            x_sample_points, y_sample_points, robot_pos, robot_rot
+        world_coords, _ = self._transform_points_to_world_yaw_only(
+            self.x_sample_points, self.y_sample_points, robot_pos, robot_rot
         )
+
+        # 填充_data的x和y坐标
+        self._data[:,:2] = world_coords[:, :2]
+
+        # 对每个采样点进行射线投射
         for i in range(self.num_x_points * self.num_y_points):
-            # px_world = 
-            # py_world = world_coords[i, 1]
-
-            # 固定机器人正上方离地3m，发射一条垂直向下的射线
-            # ray_start = np.array([px_world, py_world, 3.0], dtype=np.float64).reshape(3, 1)
-            # ray_dir = np.array([0, 0, -1.0], dtype=np.float64).reshape(3, 1)
-
-            # 屏蔽掉机器人
-            # G1的gemo全部设置成group(1)，group(0)是默认,group(2)是地形相关的
-            # 对应顺序geomgroup = (group(0), group(1), group(2), group(3), group(4), group(5))
-            geomgroup = (False, False, True, False, False, False)
             hit_dist = mujoco.mj_ray(
                 self.mj_model, 
                 self.mj_data, 
-                [world_coords[i, 0], world_coords[i, 1], 3.0],
-                [0, 0, -1],
-                geomgroup, 
-                1, 
-                -1, 
-                np.array([-1], dtype=np.int32)
+                [world_coords[i, 0], world_coords[i, 1], 3.0], # 从采样点3m高处垂直向下发射射线
+                [0, 0, -1], # 方向为垂直向下
+                self.geomgroup, # 碰撞组
+                1, # 包含静态物体
+                -1,  # 包含所有body
+                np.array([-1], dtype=np.int32) # 占位符
             )
-            
-
-            if hit_dist > 0:
-                height = 3 - hit_dist
-                self._data[i,0] = world_coords[i, 0]
-                self._data[i,1] = world_coords[i, 1]
-                self._data[i,2] = height
+            # 计算地形高度
+            self._data[i,2] = 3 - hit_dist
                 
 
         return self._data
@@ -128,9 +125,6 @@ class RayCaster:
 
         # 6. 设置Z坐标：所有点的高度与机器人底座高度相同（或加上采样点的原始Z坐标，这里原始Z=0）
         world_points[:, 2] = robot_pos[2]  # 将机器人的高度赋予所有点
-
-        # print(world_points)
-        # print(world_points.shape)
 
         return world_points, X.shape
 
