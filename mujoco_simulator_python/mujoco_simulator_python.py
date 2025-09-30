@@ -30,6 +30,9 @@ from scipy.spatial.transform import Rotation as R
 from std_msgs.msg import MultiArrayLayout, MultiArrayDimension
 from rosgraph_msgs.msg import Clock
 from .mujoco_RayCaster import RayCaster
+from collections import deque
+import copy
+import random
 
 
 class mujoco_simulator(Node):
@@ -103,6 +106,12 @@ class mujoco_simulator(Node):
         self.pause = True if self.param["initPauseFlag"] else False
         self.mujoco_step_time = 0.0
         self.map_triggered = False
+        self.cmd_deque = deque()
+        self.state_deque = deque()
+        for _ in range(self.param["cmdDelay"]):
+            self.cmd_deque.append(self.low_cmd_msg)
+        for _ in range(self.param["stateDelay"]):
+            self.state_deque.append(copy.deepcopy(self.low_state_msg))
 
         # ==================== 实现 Height Scan 功能 ====================
         if self.param["elevation_map"]["enabled"]:
@@ -123,7 +132,7 @@ class mujoco_simulator(Node):
                 pos_offset=(0.0, 0.0, 0.0),
                 yaw_offset=0.0,
                 resolution=self.map_resolution,
-                size=(0.8,0.5),
+                size=(self.map_size[0],self.map_size[1]),
             )
 
             # 声明elevation map发布者
@@ -355,8 +364,10 @@ class mujoco_simulator(Node):
             self.get_logger().error(f"命令长度 {len(msg.commands)} 不等于模型关节数 {self.mj_model.nu} ,请检查")
             return
 
+        self.cmd_deque.append(msg)
+
         # 将命令值保存到成员变量
-        self.low_cmd_msg = msg
+        self.low_cmd_msg = self.cmd_deque.popleft()
 
     def publish_terrain(self):
         marker_array = MarkerArray()
@@ -453,14 +464,77 @@ class mujoco_simulator(Node):
         self.low_state_msg.imu.linear_acceleration.x = self.sensor_data_list[self.imu_acc_head_id + 0]
         self.low_state_msg.imu.linear_acceleration.y = self.sensor_data_list[self.imu_acc_head_id + 1]
         self.low_state_msg.imu.linear_acceleration.z = self.sensor_data_list[self.imu_acc_head_id + 2]
-    
+
+        # 给传感器添加噪声
+        self.low_state_msg.joint_states.position = (np.array(self.low_state_msg.joint_states.position, dtype=float)+ np.random.uniform(-self.param["noise_joint_pos"], self.param["noise_joint_pos"], self.mj_model.nu)).tolist()
+        self.low_state_msg.joint_states.velocity = (np.array(self.low_state_msg.joint_states.velocity, dtype=float)+ np.random.uniform(-self.param["noise_joint_vel"], self.param["noise_joint_vel"], self.mj_model.nu)).tolist()
+        self.low_state_msg.imu.angular_velocity.x += np.random.uniform(-self.param["noise_imu_angle_acc"], self.param["noise_imu_angle_acc"])
+        self.low_state_msg.imu.angular_velocity.y += np.random.uniform(-self.param["noise_imu_angle_acc"], self.param["noise_imu_angle_acc"])
+        self.low_state_msg.imu.angular_velocity.z += np.random.uniform(-self.param["noise_imu_angle_acc"], self.param["noise_imu_angle_acc"])
+        noisy_ori = self.add_quat_noise_uniform(
+            np.array([
+                self.low_state_msg.imu.orientation.w,
+                self.low_state_msg.imu.orientation.x,
+                self.low_state_msg.imu.orientation.y,
+                self.low_state_msg.imu.orientation.z
+            ]),
+            angle_range=self.param["noise_imu_gravity"]
+        )
+        self.low_state_msg.imu.orientation.w = float(noisy_ori[0])
+        self.low_state_msg.imu.orientation.x = float(noisy_ori[1])
+        self.low_state_msg.imu.orientation.y = float(noisy_ori[2])
+        self.low_state_msg.imu.orientation.z = float(noisy_ori[3])
+
         # 更新时间戳
         self.low_state_msg.stamp = self.get_clock().now().to_msg()
         self.low_state_msg.joint_states.header.stamp = self.low_state_msg.stamp
         self.low_state_msg.imu.header.stamp = self.low_state_msg.stamp
 
-        # 发布当前状态
-        self.lowState_pub.publish(self.low_state_msg)
+        # 存储拷贝，避免共享引用
+        self.state_deque.append(copy.deepcopy(self.low_state_msg))
+
+        self.lowState_pub.publish(self.state_deque.popleft())
+
+
+    def add_quat_noise_uniform(self, q, angle_range=0.01):
+        """
+        给四元数添加均匀分布的小旋转噪声
+
+        参数:
+            q: ndarray, shape=(4,), 输入四元数 (w, x, y, z)，必须是单位四元数
+            angle_range: float, 噪声角度范围（弧度），扰动角度 ∈ [-angle_range, angle_range]
+
+        返回:
+            noisy_q: ndarray, shape=(4,), 加了噪声并归一化后的四元数
+        """
+        # 随机旋转轴
+        axis = np.random.randn(3)
+        axis /= np.linalg.norm(axis)
+
+        # 均匀噪声角度
+        angle = np.random.uniform(-angle_range, angle_range)
+
+        # 构造扰动四元数 dq
+        half_sin = np.sin(angle / 2.0)
+        dq = np.array([
+            np.cos(angle / 2.0),
+            axis[0] * half_sin,
+            axis[1] * half_sin,
+            axis[2] * half_sin
+        ])
+
+        # 四元数乘法 q * dq
+        w1, x1, y1, z1 = q
+        w2, x2, y2, z2 = dq
+        noisy_q = np.array([
+            w1*w2 - x1*x2 - y1*y2 - z1*z2,
+            w1*x2 + x1*w2 + y1*z2 - z1*y2,
+            w1*y2 - x1*z2 + y1*w2 + z1*x2,
+            w1*z2 + x1*y2 - y1*x2 + z1*w2
+        ])
+
+        # 归一化，保持单位四元数
+        return noisy_q / np.linalg.norm(noisy_q)
 
     def generate_and_publish_elevation_map(self):
         """

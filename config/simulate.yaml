@@ -12,10 +12,9 @@ mujoco_simulator:
 
     # modelName: "G1_29dof" 
     # modelName: "G1_29dof_float" 
-    modelName: "G1_12dof_box_foot" 
-    # modelName: "S3_22dof_ball" 
-    # modelName: "S3_12dof_ball" 
-    # modelName: "S2_22dof_ball_float" 
+    # modelName: "G1_12dof_box_foot_leg" 
+    # modelName: "G1_12dof" 
+    modelName: "S3_22dof" 
     # modelName: "L1" 
     # modelName: "Pegasus2" 
     # modelName: "S2_20dof_simp_col" 
@@ -24,8 +23,15 @@ mujoco_simulator:
     lowStateTopic: "/low_state" 
     jointCommandsTopic: "/low_command" 
 
-    # 命令延迟
-    cmdDelay: 5 # 单位是ms,0是没有延迟
+    # 消息延迟
+    cmdDelay: 0 # 单位是次,0是没有延迟, 当控制器为50Hz时，一个单位是20ms
+    stateDelay: 0 # 单位是次,0是没有延迟, 当仿真频率为500Hz时，一个单位是2ms
+
+    # 传感器噪声
+    noise_imu_angle_acc: 0.0
+    noise_imu_gravity: 0.0 
+    noise_joint_pos: 0.0
+    noise_joint_vel: 0.0
 
     # 加载模型后是否暂停
     unPauseService: "/unpause_mujoco" # 启动服务名称
@@ -39,9 +45,9 @@ mujoco_simulator:
     pointCloudType: "PointCloud2" # 可选项: PointCloud2, CustomMsg
 
     elevation_map:
-      enabled: True                                           # 设置为 true 来启用此功能
+      enabled: false                                           # 设置为 true 来启用此功能
       topic: "/mujoco_elevation_map"                          # 高程图发布的话题
-      size: [ 0.8, 0.5 ]                                      # [长, 宽] (米), 对应机器人的前后和左右
+      size: [ 1.0, 1.0 ]                                      # [长, 宽] (米), 对应机器人的前后和左右
       resolution: 0.1                                         # 分辨率 (米/格)
       update_rate: 60.0                                       # 更新频率 (Hz)
       debug_info: false                                        # 是否发布调试信息
