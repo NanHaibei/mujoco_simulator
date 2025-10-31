@@ -50,11 +50,11 @@ cd common_msgs
 git checkout ros2_version # 切换到ros2分支
 cd ..
 # 在mujoco中支持激光雷达 
-# 该仓库貌似不能放到ros2工作空间中
-# 如果ros2编译报错，请把它移动到其他位置
+# 该仓库貌似不能放到ros2工作空间中【已修复】
+# 如果ros2编译报错，请将 project.toml 的requires修改为  ["setuptools>=64", "wheel"]
 git clone https://github.com/TATP-233/MuJoCo-LiDAR.git
 cd MuJoCo-LiDAR
-pip install -e .
+python3 -m pip install .
 ```
 
 开始编译
