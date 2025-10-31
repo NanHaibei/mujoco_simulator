@@ -42,6 +42,9 @@ def generate_launch_description():
         model_type = "Pegasus"
     elif "L1" in model_name:
         model_type = "L1"
+    elif "zsl1" in model_name:
+        # 智身四足狗（robot_description/zsl1）
+        model_type = "zsl1"
 
     mjcf_path = robot_pkg_path + "/" + model_type + "/mjcf/scene_" + model_name + ".xml"
     model_name = model_name.replace("_float", "") # 删除float字段
