@@ -46,6 +46,7 @@ def generate_launch_description():
     mjcf_path = robot_pkg_path + "/" + model_type + "/mjcf/scene_" + model_name + ".xml"
     model_name = model_name.replace("_float", "") # 删除float字段
     model_name = model_name.replace("scene_", "") # 删除scene字段
+    model_name = model_name.replace("_bind", "") # 删除bind字段
     urdf_path = robot_pkg_path + "/" + model_type + "/urdf/" + model_name + ".urdf"
 
     if not os.path.exists(urdf_path): raise FileNotFoundError(f"URDF文件未找到: {urdf_path}") 

@@ -172,6 +172,7 @@ class mujoco_simulator(Node):
         """物理仿真主循环, 默认500Hz"""
         rander_count = 0
         rander_decimation = int((1.0 / self.mj_model.opt.timestep) / 60.0)
+        lowstate_decimation = int((1.0 / self.mj_model.opt.timestep) / 100.0)
         # 开启mujoco窗口
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
             while viewer.is_running():
@@ -183,7 +184,7 @@ class mujoco_simulator(Node):
                 # 间隔一定step次数进行一次画面渲染，确保60fps
                 if rander_count % rander_decimation == 0:
                     viewer.sync() 
-                rander_count += 1
+                
 
                 # 高程图可视化
                 if self.param["elevation_map"]["enabled"]:
@@ -205,7 +206,10 @@ class mujoco_simulator(Node):
                 rclpy.spin_once(self, timeout_sec=0.0)
     
                 # 发布当前状态
-                self.publish_low_state() # 200us
+                if rander_count % lowstate_decimation == 0:
+                    self.publish_low_state() # 200us
+                rander_count += 1
+                
 
                 self.temp_time2 = time.time()
                 self.mujoco_step_time = self.temp_time2 - self.temp_time1
