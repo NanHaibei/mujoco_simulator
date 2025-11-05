@@ -9,13 +9,14 @@ mujoco_simulator:
     # S2_20dof_simp_col_float
     # S2_20dof_simp_col
     # S2_22dof
+    # zsl1
 
     # modelName: "G1_29dof" 
     # modelName: "G1_29dof_float" 
     modelName: "G1_12dof_box" 
     # modelName: "G1_12dof" 
-    # modelName: "S3_22dof_noshell" 
-    # modelName: "S3_22dof_noshell_float" 
+    # modelName: "S3_22dof" 
+    # modelName: "zsl1" 
     # modelName: "L1" 
     # modelName: "Pegasus2" 
     # modelName: "S2_20dof_simp_col" 

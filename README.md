@@ -29,6 +29,11 @@ sudo apt install ros-humble-foxglove-bridge
 pip install mujoco
 ```
 
+安装高程图消息
+```shell
+sudo apt install ros-humble-grid-map-msgs
+```
+
 新建ros2工作空间
 
 ```shell
@@ -49,12 +54,9 @@ git clone https://gitee.com/LockedFlysher/common_msgs.git
 cd common_msgs
 git checkout ros2_version # 切换到ros2分支
 cd ..
-# 在mujoco中支持激光雷达 
-# 该仓库貌似不能放到ros2工作空间中
-# 如果ros2编译报错，请把它移动到其他位置
-git clone https://github.com/TATP-233/MuJoCo-LiDAR.git
-cd MuJoCo-LiDAR
-pip install -e .
+# 在mujoco中支持激光雷达 , 克隆以下包，在工作空间编译后自动可识别
+# 如果ros2编译报错，请将 project.toml 的requires修改为  ["setuptools>=64", "wheel"]
+git clone https://gitee.com/LockedFlysher/mujoco-lidar-ros2.git
 ```
 
 开始编译
