@@ -108,6 +108,7 @@ class mujoco_simulator(Node):
         self.map_triggered = False
         self.cmd_deque = deque()
         self.state_deque = deque()
+        self.cmd_length_error_logged = False  # 只记录一次命令长度错误
         for _ in range(self.param["cmdDelay"]):
             self.cmd_deque.append(self.low_cmd_msg)
         for _ in range(self.param["stateDelay"]):
@@ -155,7 +156,7 @@ class mujoco_simulator(Node):
             # 创建雷达句柄
             self.lidar_sim = MjLidarWrapper(
                 self.mj_model, 
-                self.mj_data, 
+                # self.mj_data, 
                 site_name="lidar_site",  # 与MJCF中的<site name="...">匹配
                 args={
                     "enable_profiling": False, # 启用性能分析（可选）
@@ -263,9 +264,9 @@ class mujoco_simulator(Node):
     def lidar_callback(self):
         """获取点云信息并发布"""
 
-        # 获取点云信息
-        self.lidar_sim.update_scene(self.mj_model, self.mj_data)
-        points = self.lidar_sim.get_lidar_points(self.rays_phi, self.rays_theta, self.mj_data)
+        # 获取点云信息 (使用新的 API)
+        self.lidar_sim.trace_rays(self.mj_data, self.rays_theta, self.rays_phi)
+        points = self.lidar_sim.get_hit_points()
 
         time_stamp = self.get_clock().now().to_msg()
         
@@ -365,7 +366,14 @@ class mujoco_simulator(Node):
         # 如果读取错误标志为真，则不处理命令
         if self.read_error_flag: return
         if len(msg.commands) != self.mj_model.nu:
-            self.get_logger().error(f"命令长度 {len(msg.commands)} 不等于模型关节数 {self.mj_model.nu} ,请检查")
+            if not self.cmd_length_error_logged:
+                self.get_logger().error(
+                    f"命令长度 {len(msg.commands)} 不等于模型关节数 {self.mj_model.nu}。"
+                    f"请检查是否有错误的控制器在发布命令到 {self.param['jointCommandsTopic']} 话题。"
+                    f"当前模型: {self.model_name}，需要 {self.mj_model.nu} 个关节命令。"
+                    f"此错误只会记录一次。"
+                )
+                self.cmd_length_error_logged = True
             return
 
         self.cmd_deque.append(msg)
