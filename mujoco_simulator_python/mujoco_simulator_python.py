@@ -546,9 +546,16 @@ class mujoco_simulator(Node):
         """
         # 获取采样点
         self.elevation_sample_point = self.raycaster.update_elevation_data()
+        noise = np.random.uniform(
+            -self.param["noise_elevation_map"], 
+            self.param["noise_elevation_map"], 
+            size=len(self.elevation_sample_point)
+        )
+        self.elevation_sample_point[:, 2] += noise
         # 生成并发布高程图
         msg = Float32MultiArray()
         msg.data = self.elevation_sample_point[:,2].astype(np.float32).tolist()
+        
         self.elevation_pub.publish(msg)
 
 

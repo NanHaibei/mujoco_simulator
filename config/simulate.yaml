@@ -12,8 +12,9 @@ mujoco_simulator:
     # zsl1
 
     # modelName: "G1_29dof" 
+    modelName: "G1_29dof_box_foot" 
     # modelName: "G1_29dof_float" 
-    modelName: "G1_12dof_box" 
+    # modelName: "G1_12dof_box" 
     # modelName: "G1_12dof" 
     # modelName: "S3_22dof" 
     # modelName: "zsl1" 
@@ -32,15 +33,16 @@ mujoco_simulator:
     # 传感器噪声
     noise_imu_angle_acc: 0.0
     noise_imu_gravity: 0.0 
-    noise_joint_pos: 0.0
-    noise_joint_vel: 0.0
+    noise_joint_pos: 0.01
+    noise_joint_vel: 1.5
+    noise_elevation_map: 0.0
 
     # 加载模型后是否暂停
     unPauseService: "/unpause_mujoco" # 启动服务名称
     initPauseFlag: false # 1是会暂停,0是不会暂停
 
     # 是否输出模型信息表格
-    modelTableFlag: true # 1是会,0是不会
+    modelTableFlag: false # 1是会,0是不会
 
     g_unit: "g" # 重力单位 可选项: g, m/s^2
 
