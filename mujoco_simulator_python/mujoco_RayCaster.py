@@ -7,7 +7,7 @@ class RayCaster:
             self, 
             mj_data,
             mj_model,
-            robot_base_id: int,
+            attach_link_id: int,
             pos_offset: tuple[float, float, float], 
             yaw_offset: float, 
             resolution: float, 
@@ -18,7 +18,7 @@ class RayCaster:
         Args:
             mj_data (_type_): mujoco数据句柄
             mj_model (_type_): mujoco模型句柄
-            robot_base_id (int): 机器人基座在mj_model中的id,高程图基于该基座坐标系获取
+            attach_link_id (int): 传感器依附的link在mj_model中的id,高程图基于该基座坐标系获取
             pos_offset (tuple[float, float, float]): 高程图采样点相对于机器人基座的偏移位置
             yaw_offset (float): 高程图采样点相对于机器人基座的偏航角
             resolution (float): 高程图的分辨率
@@ -27,7 +27,7 @@ class RayCaster:
         
         self.mj_data = mj_data
         self.mj_model = mj_model
-        self.robot_base_id = robot_base_id
+        self.attach_link_id = attach_link_id
         self.offset_pos = pos_offset
         self.offset_rot = yaw_offset
         self.resolution = resolution
@@ -47,23 +47,32 @@ class RayCaster:
     def update_elevation_data(self):
 
         # 读取base link的pos和quat
-        robot_pos = self.mj_data.xpos[self.robot_base_id]  # 位置 [x, y, z]
-        robot_rot = self.mj_data.xquat[self.robot_base_id]  # 四元数 [w, x, y, z]
+        robot_pos = self.mj_data.xpos[self.attach_link_id]  # 位置 [x, y, z]
+        robot_rot = self.mj_data.xquat[self.attach_link_id]  # 四元数 [w, x, y, z]
+
+        # 将offset_pos应用到robot_pos上
+        # 需要将offset_pos从body坐标系转换到世界坐标系
+        r = R.from_quat([robot_rot[1], robot_rot[2], robot_rot[3], robot_rot[0]])
+        offset_world = r.apply(self.offset_pos)
+        adjusted_robot_pos = robot_pos + offset_world
 
         # 计算世界坐标系下采样矩阵的坐标
         world_coords, _ = self._transform_points_to_world_yaw_only(
-            self.x_sample_points, self.y_sample_points, robot_pos, robot_rot
+            self.x_sample_points, self.y_sample_points, adjusted_robot_pos, robot_rot
         )
 
         # 填充_data的x和y坐标
         self._data[:,:2] = world_coords[:, :2]
 
+        # 获取射线发射的起始高度（lidar_site的世界坐标Z值）
+        ray_start_height = world_coords[0, 2]  # 所有采样点的Z坐标相同，都是robot_pos[2]
+        
         # 对每个采样点进行射线投射
         for i in range(self.num_x_points * self.num_y_points):
             hit_dist = mujoco.mj_ray(
                 self.mj_model, 
                 self.mj_data, 
-                [world_coords[i, 0], world_coords[i, 1], 3.0], # 从采样点3m高处垂直向下发射射线
+                [world_coords[i, 0], world_coords[i, 1], ray_start_height], # 从lidar_site高度垂直向下发射射线
                 [0, 0, -1], # 方向为垂直向下
                 self.geomgroup, # 碰撞组
                 1, # 包含静态物体
@@ -71,7 +80,7 @@ class RayCaster:
                 np.array([-1], dtype=np.int32) # 占位符
             )
             # 计算地形高度
-            self._data[i,2] = 3 - hit_dist
+            self._data[i,2] = hit_dist
                 
 
         return self._data

@@ -122,14 +122,27 @@ class mujoco_simulator(Node):
             self.map_size = self.param["elevation_map"]["size"]
             self.map_resolution = self.param["elevation_map"]["resolution"]
             self.elevation_map_debug = self.param["elevation_map"]["debug_info"]
-            self.robot_base_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.first_link_name)
+            attach_link_name = self.param["elevation_map"]["attach_link_name"]
+            # 获取attach_link的body ID和位置偏移
+            attach_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, attach_link_name)
+            if attach_site_id >= 0:
+                # 从site获取对应的body id和位置
+                self.elevation_attach_body_id = self.mj_model.site_bodyid[attach_site_id]
+                attach_body_name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.elevation_attach_body_id)
+                site_pos = self.mj_model.site_pos[attach_site_id].copy()  # [x, y, z]
+                self.elevation_pos_offset = (float(site_pos[0]), float(site_pos[1]), float(site_pos[2]))
+                self.get_logger().info(f"高程图将附着到site: {attach_link_name}, body: {attach_body_name}, 位置偏移: {self.elevation_pos_offset}")
+            else:
+                # 如果没有找到site，报错并退出
+                self.get_logger().error(f"未找到site '{attach_link_name}'，请检查MJCF文件和YAML配置！")
+                raise ValueError(f"Site '{attach_link_name}' not found in the model!")
             update_rate = self.param["elevation_map"]["update_rate"]
             # 实例化RayCaster传感器
             self.raycaster = RayCaster(
                 self.mj_data,
                 self.mj_model,
-                robot_base_id=self.robot_base_id,
-                pos_offset=(0.0, 0.0, 0.0),
+                attach_link_id=self.elevation_attach_body_id,
+                pos_offset=self.elevation_pos_offset,
                 yaw_offset=0.0,
                 resolution=self.map_resolution,
                 size=(self.map_size[0],self.map_size[1]),
@@ -189,15 +202,30 @@ class mujoco_simulator(Node):
                 # 高程图可视化
                 if self.param["elevation_map"]["enabled"]:
                     viewer.user_scn.ngeom = self.mj_model.ngeom  # 重置几何体数量，避免重复添加
+                    
+                    # 获取当前 lidar_site 的世界坐标高度
+                    current_robot_pos = self.mj_data.xpos[self.elevation_attach_body_id]
+                    current_robot_rot = self.mj_data.xquat[self.elevation_attach_body_id]
+                    r = R.from_quat([current_robot_rot[1], current_robot_rot[2], current_robot_rot[3], current_robot_rot[0]])
+                    offset_world = r.apply((self.elevation_pos_offset[0], self.elevation_pos_offset[1], self.elevation_pos_offset[2]))
+                    lidar_height = current_robot_pos[2] + offset_world[2]
+                    
                     # 初始化新添加的几何体（这里是一个小球）
                     for i in range(self.raycaster.num_x_points * self.raycaster.num_y_points):
                         # 增加场景中的几何体数量
                         viewer.user_scn.ngeom += 1
+                        # 计算地形实际高度：lidar高度 - hit_dist
+                        terrain_height = lidar_height - self.elevation_sample_point[i, 2]
+                        sphere_pos = [
+                            self.elevation_sample_point[i, 0],  # x
+                            self.elevation_sample_point[i, 1],  # y
+                            terrain_height                       # z: 地形实际高度
+                        ]
                         mujoco.mjv_initGeom(
                             viewer.user_scn.geoms[viewer.user_scn.ngeom - 1],  # 获取最后一个几何体的索引
                             type=mujoco.mjtGeom.mjGEOM_SPHERE,                 # 几何体类型为球体
                             size=[0.02, 0, 0],                                 # 小球半径，后两个参数忽略
-                            pos=self.elevation_sample_point[i],                                 # 小球的位置
+                            pos=sphere_pos,                                     # 小球的位置
                             mat=np.eye(3).flatten(),                           # 朝向矩阵（单位矩阵表示无旋转）
                             rgba=[1.0, 0.0, 0.0, 1.0]                         # 颜色和透明度（红色不透明）
                         )
@@ -546,6 +574,7 @@ class mujoco_simulator(Node):
         """
         # 获取采样点
         self.elevation_sample_point = self.raycaster.update_elevation_data()
+        # 添加噪声
         noise = np.random.uniform(
             -self.param["noise_elevation_map"], 
             self.param["noise_elevation_map"], 
