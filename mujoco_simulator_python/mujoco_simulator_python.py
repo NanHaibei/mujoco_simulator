@@ -4,6 +4,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from mit_msgs.msg import MITLowState, MITJointCommand, MITJointCommands
+from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose, Twist
 import yaml
 from rich.console import Console
@@ -88,6 +89,9 @@ class mujoco_simulator(Node):
         self.imu2_pub = self.create_publisher( # 发布IMU2信息
             Imu, self.param["imu2Topic"], 10
         )
+        self.odom_pub = self.create_publisher( # 发布里程计信息
+            Odometry, self.param["odomTopic"], 10
+        )
         self.marker_array_pub = self.create_publisher( # 发布障碍信息
             MarkerArray, '/visualization_marker_array', 10
         )
@@ -96,6 +100,7 @@ class mujoco_simulator(Node):
         )
         self.create_timer(1.0/10.0, self.show_log) # 10Hz输出log信息
         self.create_timer(1.0/60.0, self.publish_sim_states) # 60Hz发布真值信息
+        self.create_timer(1.0/self.param["odomPublishRate"], self.publish_odom) # 发布里程计信息
         self.tf_broadcaster = TransformBroadcaster(self)  # 发布tf变换
 
         # 初始化变量
@@ -439,6 +444,57 @@ class mujoco_simulator(Node):
             marker_array.markers.append(marker)
 
         self.marker_array_pub.publish(marker_array)
+
+    def publish_odom(self):
+        """发布机器人里程计信息 (使用标准 nav_msgs/Odometry 消息)"""
+        # 如果模型读取有错误，则不执行操作
+        if self.read_error_flag: return
+
+        # 获取first_link的body_id (通常是pelvis或base_link)
+        first_link_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.first_link_name)
+        
+        # 创建 Odometry 消息
+        odom_msg = Odometry()
+        odom_msg.header.stamp = self.get_clock().now().to_msg()
+        odom_msg.header.frame_id = "world"  # 位置参考的坐标系
+        odom_msg.child_frame_id = self.first_link_name  # 速度参考的坐标系
+
+        # === Pose 部分 (相对于 world 坐标系) ===
+        # 1. 位置信息 (世界坐标系)
+        odom_msg.pose.pose.position.x = float(self.sensor_data_list[self.real_pos_head_id + 0])
+        odom_msg.pose.pose.position.y = float(self.sensor_data_list[self.real_pos_head_id + 1])
+        odom_msg.pose.pose.position.z = float(self.sensor_data_list[self.real_pos_head_id + 2])
+
+        # 2. 四元数信息 (世界坐标系到机器人坐标系的旋转)
+        odom_msg.pose.pose.orientation.w = float(self.sensor_data_list[self.imu_quat_head_id + 0])
+        odom_msg.pose.pose.orientation.x = float(self.sensor_data_list[self.imu_quat_head_id + 1])
+        odom_msg.pose.pose.orientation.y = float(self.sensor_data_list[self.imu_quat_head_id + 2])
+        odom_msg.pose.pose.orientation.z = float(self.sensor_data_list[self.imu_quat_head_id + 3])
+
+        # 位置协方差 (仿真中为0，表示完全确定)
+        odom_msg.pose.covariance = [0.0] * 36
+
+        # === Twist 部分 (相对于 child_frame_id 即机器人坐标系) ===
+        # 3. 线速度信息 (机器人坐标系)
+        if self.real_vel_head_id != 999999:
+            odom_msg.twist.twist.linear.x = float(self.sensor_data_list[self.real_vel_head_id + 0])
+            odom_msg.twist.twist.linear.y = float(self.sensor_data_list[self.real_vel_head_id + 1])
+            odom_msg.twist.twist.linear.z = float(self.sensor_data_list[self.real_vel_head_id + 2])
+        else:
+            odom_msg.twist.twist.linear.x = 0.0
+            odom_msg.twist.twist.linear.y = 0.0
+            odom_msg.twist.twist.linear.z = 0.0
+
+        # 4. 角速度信息 (机器人坐标系) - 包含 roll/pitch/yaw 三轴
+        odom_msg.twist.twist.angular.x = float(self.sensor_data_list[self.imu_gyro_head_id + 0])
+        odom_msg.twist.twist.angular.y = float(self.sensor_data_list[self.imu_gyro_head_id + 1])
+        odom_msg.twist.twist.angular.z = float(self.sensor_data_list[self.imu_gyro_head_id + 2])  # yaw_rate
+
+        # 速度协方差 (仿真中为0，表示完全确定)
+        odom_msg.twist.covariance = [0.0] * 36
+
+        # 发布里程计信息
+        self.odom_pub.publish(odom_msg)
 
     def map_tf_callback(self, msg: TFMessage):
         if self.map_triggered:

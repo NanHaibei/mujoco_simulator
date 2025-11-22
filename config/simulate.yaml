@@ -25,11 +25,15 @@ mujoco_simulator:
     # 电机状态与命令topic
     lowStateTopic: "/low_state" 
     jointCommandsTopic: "/low_command"
-    imu2Topic: "/imu2" 
+    imu2Topic: "/imu2"
+    odomTopic: "/robot_odom"  # 里程计信息topic 
 
     # 消息延迟
     cmdDelay: 0 # 单位是次,0是没有延迟, 当控制器为50Hz时，一个单位是20ms
     stateDelay: 0 # 单位是次,0是没有延迟, 当仿真频率为500Hz时，一个单位是2ms
+
+    # 里程计发布频率
+    odomPublishRate: 100.0  # Hz，里程计信息发布频率
 
     # 传感器噪声
     noise_imu_angle_acc: 0.0
