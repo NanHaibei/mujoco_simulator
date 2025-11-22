@@ -11,8 +11,8 @@ mujoco_simulator:
     # S2_22dof
     # zsl1
 
-    # modelName: "G1_29dof" 
-    modelName: "G1_29dof_box_foot" 
+    modelName: "G1_29dof_full_collision" 
+    # modelName: "G1_29dof_box_foot" 
     # modelName: "G1_29dof_float" 
     # modelName: "G1_12dof_box" 
     # modelName: "G1_12dof" 
@@ -24,7 +24,8 @@ mujoco_simulator:
     
     # 电机状态与命令topic
     lowStateTopic: "/low_state" 
-    jointCommandsTopic: "/low_command" 
+    jointCommandsTopic: "/low_command"
+    imu2Topic: "/imu2" 
 
     # 消息延迟
     cmdDelay: 0 # 单位是次,0是没有延迟, 当控制器为50Hz时，一个单位是20ms
@@ -42,7 +43,7 @@ mujoco_simulator:
     initPauseFlag: false # 1是会暂停,0是不会暂停
 
     # 是否输出模型信息表格
-    modelTableFlag: false # 1是会,0是不会
+    modelTableFlag: true # 1是会,0是不会
 
     g_unit: "g" # 重力单位 可选项: g, m/s^2
 

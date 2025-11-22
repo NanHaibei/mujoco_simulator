@@ -85,6 +85,9 @@ class mujoco_simulator(Node):
         self.imu_pub = self.create_publisher( # 发布电机与IMU信息
             Imu, "/imu", 10
         )
+        self.imu2_pub = self.create_publisher( # 发布IMU2信息
+            Imu, self.param["imu2Topic"], 10
+        )
         self.marker_array_pub = self.create_publisher( # 发布障碍信息
             MarkerArray, '/visualization_marker_array', 10
         )
@@ -497,6 +500,42 @@ class mujoco_simulator(Node):
         self.low_state_msg.imu.linear_acceleration.y = self.sensor_data_list[self.imu_acc_head_id + 1]
         self.low_state_msg.imu.linear_acceleration.z = self.sensor_data_list[self.imu_acc_head_id + 2]
 
+        # 如果存在 imu2 传感器，则发布 imu2 数据
+        if self.imu2_quat_head_id != 999999:
+            imu2_msg = Imu()
+            imu2_msg.header.stamp = self.get_clock().now().to_msg()
+            imu2_msg.header.frame_id = "imu2_frame"
+            imu2_msg.orientation.w = self.sensor_data_list[self.imu2_quat_head_id + 0]
+            imu2_msg.orientation.x = self.sensor_data_list[self.imu2_quat_head_id + 1]
+            imu2_msg.orientation.y = self.sensor_data_list[self.imu2_quat_head_id + 2]
+            imu2_msg.orientation.z = self.sensor_data_list[self.imu2_quat_head_id + 3]
+            imu2_msg.angular_velocity.x = self.sensor_data_list[self.imu2_gyro_head_id + 0]
+            imu2_msg.angular_velocity.y = self.sensor_data_list[self.imu2_gyro_head_id + 1]
+            imu2_msg.angular_velocity.z = self.sensor_data_list[self.imu2_gyro_head_id + 2]
+            imu2_msg.linear_acceleration.x = self.sensor_data_list[self.imu2_acc_head_id + 0]
+            imu2_msg.linear_acceleration.y = self.sensor_data_list[self.imu2_acc_head_id + 1]
+            imu2_msg.linear_acceleration.z = self.sensor_data_list[self.imu2_acc_head_id + 2]
+            
+            # 添加噪声（与 imu 相同的噪声水平）
+            imu2_msg.angular_velocity.x += np.random.uniform(-self.param["noise_imu_angle_acc"], self.param["noise_imu_angle_acc"])
+            imu2_msg.angular_velocity.y += np.random.uniform(-self.param["noise_imu_angle_acc"], self.param["noise_imu_angle_acc"])
+            imu2_msg.angular_velocity.z += np.random.uniform(-self.param["noise_imu_angle_acc"], self.param["noise_imu_angle_acc"])
+            noisy_ori2 = self.add_quat_noise_uniform(
+                np.array([
+                    imu2_msg.orientation.w,
+                    imu2_msg.orientation.x,
+                    imu2_msg.orientation.y,
+                    imu2_msg.orientation.z
+                ]),
+                angle_range=self.param["noise_imu_gravity"]
+            )
+            imu2_msg.orientation.w = float(noisy_ori2[0])
+            imu2_msg.orientation.x = float(noisy_ori2[1])
+            imu2_msg.orientation.y = float(noisy_ori2[2])
+            imu2_msg.orientation.z = float(noisy_ori2[3])
+            
+            self.imu2_pub.publish(imu2_msg)
+
         # 给传感器添加噪声
         self.low_state_msg.joint_states.position = (np.array(self.low_state_msg.joint_states.position, dtype=float)+ np.random.uniform(-self.param["noise_joint_pos"], self.param["noise_joint_pos"], self.mj_model.nu)).tolist()
         self.low_state_msg.joint_states.velocity = (np.array(self.low_state_msg.joint_states.velocity, dtype=float)+ np.random.uniform(-self.param["noise_joint_vel"], self.param["noise_joint_vel"], self.mj_model.nu)).tolist()
@@ -660,6 +699,9 @@ class mujoco_simulator(Node):
             elif i == self.imu_quat_head_id: head_id_name = "imu quat head"
             elif i == self.imu_gyro_head_id: head_id_name = "imu gyro head"
             elif i == self.imu_acc_head_id: head_id_name = "imu acc head"
+            elif i == self.imu2_quat_head_id: head_id_name = "imu2 quat head"
+            elif i == self.imu2_gyro_head_id: head_id_name = "imu2 gyro head"
+            elif i == self.imu2_acc_head_id: head_id_name = "imu2 acc head"
             elif i == self.real_pos_head_id: head_id_name = "real pos head"
             elif i == self.real_vel_head_id: head_id_name = "real vel head"
             sensor_table.add_row(str(i), sensor[0], sensor[1], sensor[2], head_id_name)
@@ -705,6 +747,9 @@ class mujoco_simulator(Node):
         self.imu_quat_head_id = 999999
         self.imu_gyro_head_id = 999999
         self.imu_acc_head_id = 999999
+        self.imu2_quat_head_id = 999999
+        self.imu2_gyro_head_id = 999999
+        self.imu2_acc_head_id = 999999
         self.real_pos_head_id = 999999
         self.real_vel_head_id = 999999
         self.terrain_pos = [] # 记录场景中的box，目前还不支持其他的形状
@@ -759,7 +804,11 @@ class mujoco_simulator(Node):
             elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_FRAMEQUAT):
                 temp_type = "imu quat"
                 temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.mj_model.sensor_objid[i]+1)
-                self.imu_quat_head_id = len(self.sensor_type) 
+                # 检查是否为 imu2 传感器
+                if "imu2" in temp_name.lower():
+                    self.imu2_quat_head_id = len(self.sensor_type)
+                else:
+                    self.imu_quat_head_id = len(self.sensor_type)
                 self.sensor_type.append([temp_name+"_w", temp_type, temp_attch])
                 self.sensor_type.append([temp_name+"_x", temp_type, temp_attch])
                 self.sensor_type.append([temp_name+"_y", temp_type, temp_attch])
@@ -768,7 +817,11 @@ class mujoco_simulator(Node):
             elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_GYRO):
                 temp_type = "imu gyro"
                 temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.mj_model.sensor_objid[i]+1)
-                self.imu_gyro_head_id = len(self.sensor_type)
+                # 检查是否为 imu2 传感器
+                if "imu2" in temp_name.lower():
+                    self.imu2_gyro_head_id = len(self.sensor_type)
+                else:
+                    self.imu_gyro_head_id = len(self.sensor_type)
                 self.sensor_type.append([temp_name+"_x", temp_type, temp_attch])
                 self.sensor_type.append([temp_name+"_y", temp_type, temp_attch])
                 self.sensor_type.append([temp_name+"_z", temp_type, temp_attch])
@@ -776,7 +829,11 @@ class mujoco_simulator(Node):
             elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_ACCELEROMETER):
                 temp_type = "imu linear acc"
                 temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.mj_model.sensor_objid[i]+1)
-                self.imu_acc_head_id = len(self.sensor_type)
+                # 检查是否为 imu2 传感器
+                if "imu2" in temp_name.lower():
+                    self.imu2_acc_head_id = len(self.sensor_type)
+                else:
+                    self.imu_acc_head_id = len(self.sensor_type)
                 self.sensor_type.append([temp_name+"_x", temp_type, temp_attch])
                 self.sensor_type.append([temp_name+"_y", temp_type, temp_attch])
                 self.sensor_type.append([temp_name+"_z", temp_type, temp_attch])
