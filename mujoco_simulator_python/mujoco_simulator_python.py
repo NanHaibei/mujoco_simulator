@@ -5,7 +5,6 @@ import rclpy
 from rclpy.node import Node
 from mit_msgs.msg import MITLowState, MITJointCommand, MITJointCommands
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Pose, Twist
 import yaml
 from rich.console import Console
 from rich.table import Table
@@ -16,20 +15,13 @@ import numpy as np
 from mujoco_lidar.scan_gen import LivoxGenerator
 from mujoco_lidar.lidar_wrapper import MjLidarWrapper
 from sensor_msgs.msg import PointCloud2, PointField, JointState, Imu
-from std_msgs.msg import Header
-from geometry_msgs.msg import TransformStamped, Vector3Stamped
-from tf2_ros import TransformBroadcaster, Buffer, TransformListener
+from std_msgs.msg import Header, Float32MultiArray
+from geometry_msgs.msg import TransformStamped
+from tf2_ros import TransformBroadcaster
 from tf2_msgs.msg import TFMessage
 from visualization_msgs.msg import Marker, MarkerArray
 from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
-from tf2_ros import TransformBroadcaster
-import math
-from grid_map_msgs.msg import GridMap
-from std_msgs.msg import Float32MultiArray
-from tf2_ros import Buffer, TransformListener
 from scipy.spatial.transform import Rotation as R
-from std_msgs.msg import MultiArrayLayout, MultiArrayDimension
-from rosgraph_msgs.msg import Clock
 from .mujoco_RayCaster import RayCaster
 from collections import deque
 import copy
@@ -79,9 +71,6 @@ class mujoco_simulator(Node):
         )   
         self.joint_state_pub = self.create_publisher( # 发布关节状态
             JointState, "/joint_states", 10
-        )
-        self.real_vel_pub = self.create_publisher( # 发布线速度真值
-            Vector3Stamped, "/sim_real_vel", 10
         )
         self.imu_pub = self.create_publisher( # 发布电机与IMU信息
             Imu, "/imu", 10
@@ -271,30 +260,6 @@ class mujoco_simulator(Node):
         joint_state.velocity = self.sensor_data_list[self.joint_vel_head_id : self.joint_vel_head_id + self.mj_model.nu]
         joint_state.effort = self.sensor_data_list[self.joint_tor_head_id : self.joint_tor_head_id + self.mj_model.nu]
         self.joint_state_pub.publish(joint_state)
-        
-        # 发布世界坐标信息
-        transform = TransformStamped()
-        transform.header.stamp = self.get_clock().now().to_msg()
-        transform.header.frame_id = "world"
-        transform.child_frame_id = self.first_link_name
-        transform.transform.translation.x = float(self.sensor_data_list[self.real_pos_head_id + 0])
-        transform.transform.translation.y = float(self.sensor_data_list[self.real_pos_head_id + 1])
-        transform.transform.translation.z = float(self.sensor_data_list[self.real_pos_head_id + 2])
-        transform.transform.rotation.w = float(self.sensor_data_list[self.imu_quat_head_id + 0])
-        transform.transform.rotation.x = float(self.sensor_data_list[self.imu_quat_head_id + 1])
-        transform.transform.rotation.y = float(self.sensor_data_list[self.imu_quat_head_id + 2])
-        transform.transform.rotation.z = float(self.sensor_data_list[self.imu_quat_head_id + 3])
-        self.tf_broadcaster.sendTransform(transform)
-        
-        # 发布实际速度信息
-        if self.real_vel_head_id != 999999:  # 检查是否有实际速度传感器
-            real_vel = Vector3Stamped()
-            real_vel.header.stamp = self.get_clock().now().to_msg()
-            real_vel.header.frame_id = self.first_link_name
-            real_vel.vector.x = float(self.sensor_data_list[self.real_vel_head_id + 0])
-            real_vel.vector.y = float(self.sensor_data_list[self.real_vel_head_id + 1])
-            real_vel.vector.z = float(self.sensor_data_list[self.real_vel_head_id + 2])
-            self.real_vel_pub.publish(real_vel)
 
     def lidar_callback(self):
         """获取点云信息并发布"""
@@ -449,9 +414,6 @@ class mujoco_simulator(Node):
         """发布机器人里程计信息 (使用标准 nav_msgs/Odometry 消息)"""
         # 如果模型读取有错误，则不执行操作
         if self.read_error_flag: return
-
-        # 获取first_link的body_id (通常是pelvis或base_link)
-        first_link_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.first_link_name)
         
         # 创建 Odometry 消息
         odom_msg = Odometry()
