@@ -78,6 +78,9 @@ class mujoco_simulator(Node):
         self.imu2_pub = self.create_publisher( # 发布IMU2信息
             Imu, self.param["imu2Topic"], 10
         )
+        self.imu2_normalized_pub = self.create_publisher( # 发布IMU2归一化信息（单位为g）
+            Imu, self.param["imu2Topic"] + "_normalized", 10
+        )
         self.odom_pub = self.create_publisher( # 发布里程计信息
             Odometry, self.param["odomTopic"], 10
         )
@@ -152,6 +155,44 @@ class mujoco_simulator(Node):
             self.map_timer = self.create_timer(1.0 / update_rate, self.generate_and_publish_elevation_map)
             self.elevation_pub = self.create_publisher(Float32MultiArray, self.map_topic, 1)
         # ==================== 实现 Height Scan 功能 ====================
+
+        # ==================== 打印 IMU 传感器信息 ====================
+        # 查找 IMU 传感器并记录其附着的 body
+        self.imu_attach_body_name = None
+        self.imu_attach_body_id = -1
+        for sensor_id in range(self.mj_model.nsensor):
+            sensor_type = self.mj_model.sensor_type[sensor_id]
+            sensor_name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_SENSOR, sensor_id)
+            # 查找主 IMU 的四元数传感器（不是 imu2）
+            if sensor_type == mujoco.mjtSensor.mjSENS_FRAMEQUAT and "imu2" not in sensor_name.lower():
+                # sensor_objid 指向 site，需要找到 site 对应的 body
+                site_id = self.mj_model.sensor_objid[sensor_id]
+                if site_id >= 0:
+                    # 获取 site 对应的 body
+                    self.imu_attach_body_id = self.mj_model.site_bodyid[site_id]
+                    self.imu_attach_body_name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.imu_attach_body_id)
+                    # 获取 site 的位置偏移
+                    site_pos = self.mj_model.site_pos[site_id].copy()
+                    self.imu_pos_offset = (float(site_pos[0]), float(site_pos[1]), float(site_pos[2]))
+                    self.get_logger().info(f"IMU 传感器附着到 body: {self.imu_attach_body_name}, 位置偏移: {self.imu_pos_offset}")
+                    break
+
+        # 打印 torso_link 到 pelvis 的偏移
+        try:
+            torso_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, "torso_link")
+            pelvis_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, "pelvis")
+            if torso_id >= 0 and pelvis_id >= 0:
+                # 在初始配置下计算偏移
+                mujoco.mj_forward(self.mj_model, self.mj_data)
+                torso_pos = self.mj_data.xpos[torso_id].copy()
+                pelvis_pos = self.mj_data.xpos[pelvis_id].copy()
+                offset = torso_pos - pelvis_pos
+                self.get_logger().info(f"torso_link 到 pelvis 的偏移（初始配置）: ({offset[0]:.6f}, {offset[1]:.6f}, {offset[2]:.6f})")
+            else:
+                self.get_logger().warn("未找到 torso_link 或 pelvis body")
+        except Exception as e:
+            self.get_logger().warn(f"计算 torso_link 到 pelvis 偏移失败: {e}")
+        # ==================== 打印 IMU 传感器信息 ====================
 
         # 如果mjcf中有lidar_site，则读取雷达信息
         lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
@@ -251,7 +292,48 @@ class mujoco_simulator(Node):
 
         # 发布地形信息
         self.publish_terrain()
-            
+
+        # 实时打印 lidar_site 相对于地板的高度
+        if self.param.get("elevation_map", {}).get("enabled", False):
+            try:
+                # 获取 attach body 在 world 下的位置与四元数
+                pos = self.mj_data.xpos[self.elevation_attach_body_id]
+                quat = self.mj_data.xquat[self.elevation_attach_body_id]
+                # 将 site 在 body 下的偏移旋转到 world 坐标系
+                r = R.from_quat([quat[1], quat[2], quat[3], quat[0]])  # mujoco quat 顺序为 [w,x,y,z]
+                offset_world = r.apply(self.elevation_pos_offset)
+                lidar_z_world = float(pos[2] + offset_world[2])
+
+                # 估计地板高度（取场景中最低的 geom z 坐标，否则默认 0.0）
+                floor_z = 0.0
+                if hasattr(self, 'terrain_pos') and len(self.terrain_pos) > 0:
+                    floor_z = float(min(p[2] for p in self.terrain_pos))
+
+                height_above_floor = lidar_z_world - floor_z
+
+                # 实时打印（会出现在 ROS 日志中）
+                self.get_logger().info(
+                    f"lidar_site z (world) = {lidar_z_world:.4f} m, above floor = {height_above_floor:.4f} m"
+                )
+            except Exception as e:
+                # 避免偶发索引错误导致程序中断
+                self.get_logger().warn(f"无法计算 lidar_site 高度: {e}")
+
+        # 实时打印 IMU 在世界坐标系下的绝对高度
+        if hasattr(self, 'imu_attach_body_id') and self.imu_attach_body_id >= 0:
+            try:
+                # 获取 IMU attach body 在 world 下的位置与四元数
+                imu_body_pos = self.mj_data.xpos[self.imu_attach_body_id]
+                imu_body_quat = self.mj_data.xquat[self.imu_attach_body_id]
+                # 将 IMU site 在 body 下的偏移旋转到 world 坐标系
+                r_imu = R.from_quat([imu_body_quat[1], imu_body_quat[2], imu_body_quat[3], imu_body_quat[0]])
+                imu_offset_world = r_imu.apply(self.imu_pos_offset)
+                imu_z_world = float(imu_body_pos[2] + imu_offset_world[2])
+
+                self.get_logger().info(f"imu z (world) = {imu_z_world:.4f} m")
+            except Exception as e:
+                self.get_logger().warn(f"无法计算 IMU 世界坐标高度: {e}")
+
         # 发布关节信息
         joint_state = JointState()
         joint_state.header.stamp = self.get_clock().now().to_msg()
@@ -458,6 +540,26 @@ class mujoco_simulator(Node):
         # 发布里程计信息
         self.odom_pub.publish(odom_msg)
 
+        # 发布 TF 变换: world -> first_link_name
+        odom_tf = TransformStamped()
+        odom_tf.header.stamp = odom_msg.header.stamp
+        odom_tf.header.frame_id = "world"
+        odom_tf.child_frame_id = self.first_link_name
+
+        # 位置信息
+        odom_tf.transform.translation.x = odom_msg.pose.pose.position.x
+        odom_tf.transform.translation.y = odom_msg.pose.pose.position.y
+        odom_tf.transform.translation.z = odom_msg.pose.pose.position.z
+
+        # 四元数信息
+        odom_tf.transform.rotation.w = odom_msg.pose.pose.orientation.w
+        odom_tf.transform.rotation.x = odom_msg.pose.pose.orientation.x
+        odom_tf.transform.rotation.y = odom_msg.pose.pose.orientation.y
+        odom_tf.transform.rotation.z = odom_msg.pose.pose.orientation.z
+
+        # 发布 TF
+        self.tf_broadcaster.sendTransform(odom_tf)
+
     def map_tf_callback(self, msg: TFMessage):
         if self.map_triggered:
             return
@@ -552,7 +654,19 @@ class mujoco_simulator(Node):
             imu2_msg.orientation.y = float(noisy_ori2[2])
             imu2_msg.orientation.z = float(noisy_ori2[3])
             
+            # 发布原始 IMU2 数据（单位为 m/s²）
             self.imu2_pub.publish(imu2_msg)
+
+            # 创建并发布归一化的 IMU2 数据（线加速度单位为 g）
+            imu2_normalized_msg = Imu()
+            imu2_normalized_msg.header = imu2_msg.header
+            imu2_normalized_msg.orientation = imu2_msg.orientation
+            imu2_normalized_msg.angular_velocity = imu2_msg.angular_velocity
+            # 将线加速度从 m/s² 转换为 g（除以 9.80665）
+            imu2_normalized_msg.linear_acceleration.x = imu2_msg.linear_acceleration.x / 9.80665
+            imu2_normalized_msg.linear_acceleration.y = imu2_msg.linear_acceleration.y / 9.80665
+            imu2_normalized_msg.linear_acceleration.z = imu2_msg.linear_acceleration.z / 9.80665
+            self.imu2_normalized_pub.publish(imu2_normalized_msg)
 
         # 给传感器添加噪声
         self.low_state_msg.joint_states.position = (np.array(self.low_state_msg.joint_states.position, dtype=float)+ np.random.uniform(-self.param["noise_joint_pos"], self.param["noise_joint_pos"], self.mj_model.nu)).tolist()
@@ -894,5 +1008,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-
-
