@@ -330,7 +330,7 @@ class mujoco_simulator(Node):
                 imu_offset_world = r_imu.apply(self.imu_pos_offset)
                 imu_z_world = float(imu_body_pos[2] + imu_offset_world[2])
 
-                self.get_logger().info(f"imu z (world) = {imu_z_world:.4f} m")
+                # self.get_logger().info(f"imu z (world) = {imu_z_world:.4f} m")
             except Exception as e:
                 self.get_logger().warn(f"无法计算 IMU 世界坐标高度: {e}")
 

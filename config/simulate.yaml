@@ -20,6 +20,7 @@ mujoco_simulator:
     # modelName: "zsl1" 
     # modelName: "L1" 
     # modelName: "Pegasus2" 
+    # modelName: "Go2" 
     # modelName: "S2_20dof_simp_col" 
     
     # 电机状态与命令topic
@@ -54,7 +55,7 @@ mujoco_simulator:
     pointCloudType: "PointCloud2" # 可选项: PointCloud2, CustomMsg
 
     elevation_map:
-      enabled: true                                           # 设置为 true 来启用此功能
+      enabled: false                                           # 设置为 true 来启用此功能
       topic: "/mujoco_elevation_map"                          # 高程图发布的话题
       attach_link_name: "lidar_site"                         # 以哪一个link为基准
       size: [ 1.0, 1.0 ]                                      # [长, 宽] (米), 对应机器人的前后和左右

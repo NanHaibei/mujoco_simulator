@@ -45,6 +45,9 @@ def generate_launch_description():
     elif "zsl1" in model_name:
         # 智身四足狗（robot_description/zsl1）
         model_type = "zsl1"
+    elif "Go2" in model_name:
+        # 智身四足狗（robot_description/Go2）
+        model_type = "Go2"
 
     mjcf_path = robot_pkg_path + "/" + model_type + "/mjcf/scene_" + model_name + ".xml"
     model_name = model_name.replace("_float", "") # 删除float字段
@@ -79,20 +82,20 @@ def generate_launch_description():
             ]
         ),
         # 发布机器人状态以可视化
-        # Node(
-        #     package='robot_state_publisher',
-        #     executable='robot_state_publisher',
-        #     name='robot_state_publisher',
-        #     output='both',
-        #     parameters=[{'robot_description': open(urdf_path).read()}]
-        # ),
-        # # foxglove节点
-        # IncludeLaunchDescription(
-        #     AnyLaunchDescriptionSource(xml_launch_path),
-        #     launch_arguments={
-        #         "output": "log"  # 覆盖子文件节点的 output 属性
-        #     }.items()
-        # ),
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name='robot_state_publisher',
+            output='both',
+            parameters=[{'robot_description': open(urdf_path).read()}]
+        ),
+        # foxglove节点
+        IncludeLaunchDescription(
+            AnyLaunchDescriptionSource(xml_launch_path),
+            launch_arguments={
+                "output": "log"  # 覆盖子文件节点的 output 属性
+            }.items()
+        ),
         # 进行rosbag2录制
         # ExecuteProcess(
         #     cmd=['ros2', 'bag', 'record', '-o', bag_folder_path, '-a', '-s', 'mcap'],  # 录制所有话题到 my_bag 目录
