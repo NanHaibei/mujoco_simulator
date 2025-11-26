@@ -200,17 +200,33 @@ class mujoco_simulator(Node):
             # 获取传感器的位置
             self.lidar_site_pos = self.mj_model.site_pos[lidar_site_id].copy()  # [x, y, z]
             self.lidar_site_quat = self.mj_model.site_quat[lidar_site_id].copy() # [w, x, y, z]
+            
+            # 获取机器人body ID（用于排除自身碰撞检测）
+            # 假设第一个link就是机器人的base_link
+            try:
+                robot_body_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.first_link_name)
+            except:
+                robot_body_id = -1  # 如果找不到，使用-1表示不排除任何body
+            
             # 设置雷达类型
-            livox_generator = LivoxGenerator("mid360")
-            self.rays_theta, self.rays_phi = livox_generator.sample_ray_angles()
-            # 创建雷达句柄
+            self.livox_generator = LivoxGenerator("mid360")
+            self.rays_theta, self.rays_phi = self.livox_generator.sample_ray_angles()
+            
+            # 设置geomgroup（控制哪些几何体组可见）
+            # 前3组可见(1)，后3组不可见(0)
+            geomgroup = np.array([1, 1, 1, 0, 0, 0], dtype=np.uint8)
+            
+            # 创建雷达句柄（新版本API：不再需要传入mj_data）
             self.lidar_sim = MjLidarWrapper(
                 self.mj_model, 
-                self.mj_data, 
                 site_name="lidar_site",  # 与MJCF中的<site name="...">匹配
+                backend="gpu",
+                cutoff_dist=100.0,
                 args={
-                    "enable_profiling": False, # 启用性能分析（可选）
-                    "verbose": False           # 显示详细信息（可选）
+                    'bodyexclude': robot_body_id,
+                    'geomgroup': geomgroup,
+                    'max_candidates': 64,  # GPU后端特定参数：BVH候选节点数
+                    'ti_init_args': {'device_memory_GB': 4.0}  # Taichi初始化参数
                 }
             )
             # 点云发布者
@@ -346,9 +362,18 @@ class mujoco_simulator(Node):
     def lidar_callback(self):
         """获取点云信息并发布"""
 
-        # 获取点云信息
-        self.lidar_sim.update_scene(self.mj_model, self.mj_data)
-        points = self.lidar_sim.get_lidar_points(self.rays_phi, self.rays_theta, self.mj_data)
+        # 更新雷达射线角度（动态扫描）
+        self.rays_theta, self.rays_phi = self.livox_generator.sample_ray_angles()
+        
+        # 使用新版API：trace_rays 执行光线追踪
+        self.lidar_sim.trace_rays(self.mj_data, self.rays_theta, self.rays_phi)
+        
+        # 使用新版API：get_hit_points 获取击中点（相对于雷达坐标系）
+        hit_points = self.lidar_sim.get_hit_points()
+        
+        # 将点云转换到世界坐标系
+        world_points = hit_points
+        # world_points = hit_points @ self.lidar_sim.sensor_rotation.T + self.lidar_sim.sensor_position
 
         time_stamp = self.get_clock().now().to_msg()
         
@@ -364,11 +389,11 @@ class mujoco_simulator(Node):
         point_cloud_msg.header.stamp = time_stamp
         point_cloud_msg.is_bigendian = False
         point_cloud_msg.point_step = 12  # 每个点12字节 (3个float32 * 4字节)
-        point_cloud_msg.row_step = point_cloud_msg.point_step * len(points)
+        point_cloud_msg.row_step = point_cloud_msg.point_step * len(world_points)
         point_cloud_msg.height = 1  # 非结构化点云
-        point_cloud_msg.width = len(points)
+        point_cloud_msg.width = len(world_points)
         point_cloud_msg.is_dense = True  # 没有无效点
-        point_cloud_msg.data = points.astype(np.float32).tobytes() # 将numpy数组转换为字节数据
+        point_cloud_msg.data = world_points.astype(np.float32).tobytes() # 将numpy数组转换为字节数据
         self.point_cloud_pub.publish(point_cloud_msg) # 发布点云信息
 
         # 点云相对于base_link的坐标转换
