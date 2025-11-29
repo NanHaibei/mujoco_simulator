@@ -154,8 +154,6 @@ class mujoco_simulator(Node):
             self.elevation_sample_point = np.zeros((self.grid_size_x * self.grid_size_y, 3), dtype=np.float32)
             self.map_timer = self.create_timer(1.0 / update_rate, self.generate_and_publish_elevation_map)
             self.elevation_pub = self.create_publisher(Float32MultiArray, self.map_topic, 1)
-        # ==================== 实现 Height Scan 功能 ====================
-
         # ==================== 打印 IMU 传感器信息 ====================
         # 查找 IMU 传感器并记录其附着的 body
         self.imu_attach_body_name = None
@@ -192,8 +190,8 @@ class mujoco_simulator(Node):
                 self.get_logger().warn("未找到 torso_link 或 pelvis body")
         except Exception as e:
             self.get_logger().warn(f"计算 torso_link 到 pelvis 偏移失败: {e}")
-        # ==================== 打印 IMU 传感器信息 ====================
 
+        # ==================== 使用Mujoco-Lidar发布电云信息 ====================
         # 如果mjcf中有lidar_site，则读取雷达信息
         lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
         if lidar_site_id > 0:
@@ -201,39 +199,32 @@ class mujoco_simulator(Node):
             self.lidar_site_pos = self.mj_model.site_pos[lidar_site_id].copy()  # [x, y, z]
             self.lidar_site_quat = self.mj_model.site_quat[lidar_site_id].copy() # [w, x, y, z]
             
-            # 获取机器人body ID（用于排除自身碰撞检测）
-            # 假设第一个link就是机器人的base_link
-            try:
-                robot_body_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.first_link_name)
-            except:
-                robot_body_id = -1  # 如果找不到，使用-1表示不排除任何body
-            
             # 设置雷达类型
             self.livox_generator = LivoxGenerator("mid360")
             self.rays_theta, self.rays_phi = self.livox_generator.sample_ray_angles()
             
             # 设置geomgroup（控制哪些几何体组可见）
             # 前3组可见(1)，后3组不可见(0)
-            geomgroup = np.array([1, 1, 1, 0, 0, 0], dtype=np.uint8)
+            geomgroup = np.array([1, 0, 0, 0, 0, 0], dtype=np.uint8)
             
             # 创建雷达句柄（新版本API：不再需要传入mj_data）
             self.lidar_sim = MjLidarWrapper(
                 self.mj_model, 
                 site_name="lidar_site",  # 与MJCF中的<site name="...">匹配
-                backend="gpu",
+                backend="cpu", # 貌似GPU后段性能还差一点
                 cutoff_dist=100.0,
                 args={
-                    'bodyexclude': robot_body_id,
+                    'bodyexclude': -1,
                     'geomgroup': geomgroup,
-                    'max_candidates': 64,  # GPU后端特定参数：BVH候选节点数
-                    'ti_init_args': {'device_memory_GB': 4.0}  # Taichi初始化参数
+                    # 'max_candidates': 64,  # GPU后端特定参数：BVH候选节点数
+                    # 'ti_init_args': {'device_memory_GB': 4.0}  # Taichi初始化参数
                 }
             )
             # 点云发布者
             self.point_cloud_pub = self.create_publisher(
                 PointCloud2, "/point_cloud", 100
             )
-            self.create_timer(1.0/10.0, self.lidar_callback) # 10Hz发布点云消息
+            self.create_timer(1.0/self.param["pointCloudPublishRate"], self.lidar_callback) # 从yaml读取点云发布频率
 
     def run(self):
         """物理仿真主循环, 默认500Hz"""
@@ -485,14 +476,22 @@ class mujoco_simulator(Node):
         marker_array = MarkerArray()
         id = 0
 
-        for i in range(len(self.terrain_pos)):  # boxes 里存放你的障碍物信息
+        for i in range(len(self.terrain_pos)):
             marker = Marker()
             marker.header.frame_id = "world"
             marker.header.stamp = self.get_clock().now().to_msg()
             marker.ns = "mujoco"
             marker.id = id   # 每个 marker 必须有唯一 id
             id += 1
-            marker.type = Marker.CUBE
+            
+            # 根据地形类型设置marker类型
+            if self.terrain_type[i] == 'box':
+                marker.type = Marker.CUBE
+            elif self.terrain_type[i] == 'cylinder':
+                marker.type = Marker.CYLINDER
+            else:
+                marker.type = Marker.CUBE  # 默认为CUBE
+            
             marker.action = Marker.ADD
 
             marker.pose.position.x = self.terrain_pos[i][0]
@@ -909,10 +908,11 @@ class mujoco_simulator(Node):
         self.imu2_acc_head_id = 999999
         self.real_pos_head_id = 999999
         self.real_vel_head_id = 999999
-        self.terrain_pos = [] # 记录场景中的box，目前还不支持其他的形状
+        self.terrain_pos = [] # 记录场景中的障碍物位置
         self.terrain_size = []
         self.terrain_quat = []
         self.terrain_rgba = []
+        self.terrain_type = [] # 记录障碍物类型（box或cylinder）
         # 读取模型名称
         self.model_name = self.mj_model.names.split(b'\x00', 1)[0].decode('utf-8')
         # 读取加载的模型时间步长
@@ -1016,8 +1016,7 @@ class mujoco_simulator(Node):
             temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, self.mj_model.sensor_objid[i])
             self.sensor_type.append([temp_name, temp_type, temp_attch])
         
-        # 读取所有的box障碍物
-        
+        # 读取所有的box和cylinder障碍物
         for geom_id in range(self.mj_model.ngeom):
             geom_type = self.mj_model.geom_type[geom_id]
             if geom_type == mujoco.mjtGeom.mjGEOM_BOX:
@@ -1025,6 +1024,15 @@ class mujoco_simulator(Node):
                 self.terrain_quat.append(self.mj_model.geom_quat[geom_id].copy())
                 self.terrain_size.append(self.mj_model.geom_size[geom_id].copy() * 2) # mjcf中是半尺寸，这里改为全尺寸
                 self.terrain_rgba.append(self.mj_model.geom_rgba[geom_id].copy())
+                self.terrain_type.append('box')
+            elif geom_type == mujoco.mjtGeom.mjGEOM_CYLINDER:
+                self.terrain_pos.append(self.mj_model.geom_pos[geom_id].copy())
+                self.terrain_quat.append(self.mj_model.geom_quat[geom_id].copy())
+                # 圆柱体的size: [radius, height]，注意mujoco中height是半高度
+                size = self.mj_model.geom_size[geom_id].copy()
+                self.terrain_size.append([size[0] * 2, size[0] * 2, size[1] * 2])  # [diameter, diameter, full_height]
+                self.terrain_rgba.append(self.mj_model.geom_rgba[geom_id].copy())
+                self.terrain_type.append('cylinder')
 
 def main(args=None):
     rclpy.init(args=args)
