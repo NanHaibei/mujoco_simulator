@@ -10,6 +10,10 @@ mujoco_simulator:
     odomPublishRate: 100.0  # Hz，里程计信息发布频率
     # 点云发布频率
     pointCloudPublishRate: 10.0  # Hz，点云信息发布频率
+    # 低状态发布频率
+    lowStatePublishRate: 100.0  # Hz，电机与IMU状态发布频率
+    # 渲染频率
+    renderRate: 60.0  # Hz，MuJoCo可视化窗口渲染频率
 
     # 消息延迟
     cmdDelay: 0 # 单位是次,0是没有延迟, 当控制器为50Hz时，一个单位是20ms
@@ -27,6 +31,9 @@ mujoco_simulator:
 
     # 是否输出模型信息表格
     modelTableFlag: false # 1是会,0是不会
+
+    # 是否输出log信息（lidar和IMU高度信息）
+    enableLogOutput: true # true是输出,false是不输出
 
     g_unit: "g" # 重力单位 可选项: g, m/s^2
 

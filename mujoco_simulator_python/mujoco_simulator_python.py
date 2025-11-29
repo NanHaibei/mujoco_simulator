@@ -72,7 +72,7 @@ class mujoco_simulator(Node):
         self.joint_state_pub = self.create_publisher( # 发布关节状态
             JointState, "/joint_states", 10
         )
-        self.imu_pub = self.create_publisher( # 发布电机与IMU信息
+        self.imu_pub = self.create_publisher( # 发布IMU信息
             Imu, "/imu", 10
         )
         self.imu2_pub = self.create_publisher( # 发布IMU2信息
@@ -112,6 +112,13 @@ class mujoco_simulator(Node):
             self.cmd_deque.append(self.low_cmd_msg)
         for _ in range(self.param["stateDelay"]):
             self.state_deque.append(copy.deepcopy(self.low_state_msg))
+        
+        # 初始化step耗时统计变量
+        self.step_times = deque(maxlen=1000)  # 保存最近1000次step的耗时
+        self.step_time_min = float('inf')
+        self.step_time_max = 0.0
+        self.step_time_sum = 0.0
+        self.step_count = 0
 
         # ==================== 实现 Height Scan 功能 ====================
         if self.param["elevation_map"]["enabled"]:
@@ -191,7 +198,7 @@ class mujoco_simulator(Node):
         except Exception as e:
             self.get_logger().warn(f"计算 torso_link 到 pelvis 偏移失败: {e}")
 
-        # ==================== 使用Mujoco-Lidar发布电云信息 ====================
+        # ==================== 使用Mujoco-Lidar发布点云信息 ====================
         # 如果mjcf中有lidar_site，则读取雷达信息
         lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
         if lidar_site_id > 0:
@@ -211,7 +218,7 @@ class mujoco_simulator(Node):
             self.lidar_sim = MjLidarWrapper(
                 self.mj_model, 
                 site_name="lidar_site",  # 与MJCF中的<site name="...">匹配
-                backend="cpu", # 貌似GPU后段性能还差一点
+                backend="cpu", # 貌似GPU后端性能还差一点
                 cutoff_dist=100.0,
                 args={
                     'bodyexclude': -1,
@@ -226,11 +233,15 @@ class mujoco_simulator(Node):
             )
             self.create_timer(1.0/self.param["pointCloudPublishRate"], self.lidar_callback) # 从yaml读取点云发布频率
 
+        # 计算渲染和状态发布的抽取频率（decimation）
+        # 从yaml读取渲染频率
+        self.render_decimation = int((1.0 / self.mj_model.opt.timestep) / self.param["renderRate"])
+        # 从yaml读取低状态发布频率
+        self.lowstate_decimation = int((1.0 / self.mj_model.opt.timestep) / self.param["lowStatePublishRate"])
+
     def run(self):
         """物理仿真主循环, 默认500Hz"""
         rander_count = 0
-        rander_decimation = int((1.0 / self.mj_model.opt.timestep) / 60.0)
-        lowstate_decimation = int((1.0 / self.mj_model.opt.timestep) / 100.0)
         # 开启mujoco窗口
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
             while viewer.is_running():
@@ -239,8 +250,8 @@ class mujoco_simulator(Node):
 
                 # 进行物理仿真
                 if not self.pause: mujoco.mj_step(self.mj_model, self.mj_data)
-                # 间隔一定step次数进行一次画面渲染，确保60fps
-                if rander_count % rander_decimation == 0:
+                # 间隔一定step次数进行一次画面渲染
+                if rander_count % self.render_decimation == 0:
                     viewer.sync() 
                 
 
@@ -279,13 +290,21 @@ class mujoco_simulator(Node):
                 rclpy.spin_once(self, timeout_sec=0.0)
     
                 # 发布当前状态
-                if rander_count % lowstate_decimation == 0:
+                if rander_count % self.lowstate_decimation == 0:
                     self.publish_low_state() # 200us
                 rander_count += 1
                 
 
                 self.temp_time2 = time.time()
                 self.mujoco_step_time = self.temp_time2 - self.temp_time1
+                
+                # 统计step耗时（转换为毫秒）
+                step_time_ms = self.mujoco_step_time * 1e3
+                self.step_times.append(step_time_ms)
+                self.step_time_min = min(self.step_time_min, step_time_ms)
+                self.step_time_max = max(self.step_time_max, step_time_ms)
+                self.step_time_sum += step_time_ms
+                self.step_count += 1
 
                 # sleep 以保证仿真实时
                 time_until_next_step = self.mj_model.opt.timestep - self.mujoco_step_time
@@ -299,47 +318,6 @@ class mujoco_simulator(Node):
 
         # 发布地形信息
         self.publish_terrain()
-
-        # 实时打印 lidar_site 相对于地板的高度
-        if self.param.get("elevation_map", {}).get("enabled", False):
-            try:
-                # 获取 attach body 在 world 下的位置与四元数
-                pos = self.mj_data.xpos[self.elevation_attach_body_id]
-                quat = self.mj_data.xquat[self.elevation_attach_body_id]
-                # 将 site 在 body 下的偏移旋转到 world 坐标系
-                r = R.from_quat([quat[1], quat[2], quat[3], quat[0]])  # mujoco quat 顺序为 [w,x,y,z]
-                offset_world = r.apply(self.elevation_pos_offset)
-                lidar_z_world = float(pos[2] + offset_world[2])
-
-                # 估计地板高度（取场景中最低的 geom z 坐标，否则默认 0.0）
-                floor_z = 0.0
-                if hasattr(self, 'terrain_pos') and len(self.terrain_pos) > 0:
-                    floor_z = float(min(p[2] for p in self.terrain_pos))
-
-                height_above_floor = lidar_z_world - floor_z
-
-                # 实时打印（会出现在 ROS 日志中）
-                self.get_logger().info(
-                    f"lidar_site z (world) = {lidar_z_world:.4f} m, above floor = {height_above_floor:.4f} m"
-                )
-            except Exception as e:
-                # 避免偶发索引错误导致程序中断
-                self.get_logger().warn(f"无法计算 lidar_site 高度: {e}")
-
-        # 实时打印 IMU 在世界坐标系下的绝对高度
-        if hasattr(self, 'imu_attach_body_id') and self.imu_attach_body_id >= 0:
-            try:
-                # 获取 IMU attach body 在 world 下的位置与四元数
-                imu_body_pos = self.mj_data.xpos[self.imu_attach_body_id]
-                imu_body_quat = self.mj_data.xquat[self.imu_attach_body_id]
-                # 将 IMU site 在 body 下的偏移旋转到 world 坐标系
-                r_imu = R.from_quat([imu_body_quat[1], imu_body_quat[2], imu_body_quat[3], imu_body_quat[0]])
-                imu_offset_world = r_imu.apply(self.imu_pos_offset)
-                imu_z_world = float(imu_body_pos[2] + imu_offset_world[2])
-
-                # self.get_logger().info(f"imu z (world) = {imu_z_world:.4f} m")
-            except Exception as e:
-                self.get_logger().warn(f"无法计算 IMU 世界坐标高度: {e}")
 
         # 发布关节信息
         joint_state = JointState()
@@ -434,8 +412,57 @@ class mujoco_simulator(Node):
 
     def show_log(self):
         """输出日志"""
-        pass
-        # self.get_logger().info(f"物理仿真渲染耗时: {self.mujoco_step_time:.4f} 秒")
+        # 检查是否启用log输出
+        if not self.param.get("enableLogOutput", True):
+            return
+        
+        # 输出step耗时统计
+        if self.step_count > 0:
+            mean_time = self.step_time_sum / self.step_count
+            self.get_logger().info(
+                f"runtime[min/mean/max] {self.step_time_min:.2f}/{mean_time:.2f}/{self.step_time_max:.2f} ms"
+            )
+        
+        # # 实时打印 lidar_site 相对于地板的高度
+        # if self.param.get("elevation_map", {}).get("enabled", False):
+        #     try:
+        #         # 获取 attach body 在 world 下的位置与四元数
+        #         pos = self.mj_data.xpos[self.elevation_attach_body_id]
+        #         quat = self.mj_data.xquat[self.elevation_attach_body_id]
+        #         # 将 site 在 body 下的偏移旋转到 world 坐标系
+        #         r = R.from_quat([quat[1], quat[2], quat[3], quat[0]])  # mujoco quat 顺序为 [w,x,y,z]
+        #         offset_world = r.apply(self.elevation_pos_offset)
+        #         lidar_z_world = float(pos[2] + offset_world[2])
+
+        #         # 估计地板高度（取场景中最低的 geom z 坐标，否则默认 0.0）
+        #         floor_z = 0.0
+        #         if hasattr(self, 'terrain_pos') and len(self.terrain_pos) > 0:
+        #             floor_z = float(min(p[2] for p in self.terrain_pos))
+
+        #         height_above_floor = lidar_z_world - floor_z
+
+        #         # 实时打印（会出现在 ROS 日志中）
+        #         self.get_logger().info(
+        #             f"lidar_site z (world) = {lidar_z_world:.4f} m, above floor = {height_above_floor:.4f} m"
+        #         )
+        #     except Exception as e:
+        #         # 避免偶发索引错误导致程序中断
+        #         self.get_logger().warn(f"无法计算 lidar_site 高度: {e}")
+
+        # # 实时打印 IMU 在世界坐标系下的绝对高度
+        # if hasattr(self, 'imu_attach_body_id') and self.imu_attach_body_id >= 0:
+        #     try:
+        #         # 获取 IMU attach body 在 world 下的位置与四元数
+        #         imu_body_pos = self.mj_data.xpos[self.imu_attach_body_id]
+        #         imu_body_quat = self.mj_data.xquat[self.imu_attach_body_id]
+        #         # 将 IMU site 在 body 下的偏移旋转到 world 坐标系
+        #         r_imu = R.from_quat([imu_body_quat[1], imu_body_quat[2], imu_body_quat[3], imu_body_quat[0]])
+        #         imu_offset_world = r_imu.apply(self.imu_pos_offset)
+        #         imu_z_world = float(imu_body_pos[2] + imu_offset_world[2])
+
+        #         self.get_logger().info(f"imu z (world) = {imu_z_world:.4f} m")
+        #     except Exception as e:
+        #         self.get_logger().warn(f"无法计算 IMU 世界坐标高度: {e}")
 
     def pd_controller(self, model, data):
         """mujoco控制回调,根据命令值计算力矩
