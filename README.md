@@ -17,21 +17,16 @@
 wget http://fishros.com/install -O fishros && . fishros
 ```
 
-安装foxglove包用于可视化
+安装foxglove包与高程图信息
 
 ```shell
-sudo apt install ros-humble-foxglove-bridge
+sudo apt install ros-humble-foxglove-bridge ros-humble-grid-map-msgs
 ```
 
 安装mujoco-python
 
 ```shell
 pip install mujoco
-```
-
-安装高程图消息
-```shell
-sudo apt install ros-humble-grid-map-msgs
 ```
 
 新建ros2工作空间
@@ -49,14 +44,14 @@ cd mujoco_simulator/src
 git clone https://github.com/NanHaibei/mujoco_simulator.git
 # 实验室机器人模型库
 git clone https://gitee.com/coralab/robot_description_coral.git 
-# ros2 自定义消息
-git clone https://gitee.com/LockedFlysher/common_msgs.git
-cd common_msgs
-git checkout ros2_version # 切换到ros2分支
-cd ..
-# 在mujoco中支持激光雷达 , 克隆以下包，在工作空间编译后自动可识别
-# 如果ros2编译报错，请将 project.toml 的requires修改为  ["setuptools>=64", "wheel"]
-git clone https://gitee.com/LockedFlysher/mujoco-lidar-ros2.git
+# 自定义消息类型
+git clone https://gitee.com/nanhaibei/communicate_interface.git
+
+# 安装mujoco激光雷达包 
+cd src/mujoco_simulator/mujoco_simulator_python/third_party/tibvh
+pip install .
+cd mujoco_simulator/mujoco_simulator_python/third_party/MuJoCo-LiDAR
+pip install ".[gpu]"
 ```
 
 开始编译
@@ -72,46 +67,47 @@ colcon build
 
 ### 3.1 启动mujoco仿真
 
-仓库的主要超参数保存在`config/simulate.yaml`中，modelName设置了仿真使用的机器人模型
-
-```yaml
-mujoco_simulator:
-    # 使用的模型名称 目前的可选项如下
-    # G1_29dof_float， 
-    # G1_29dof，
-    # S1_20dof_simp_col
-    # S1_20dof_simp_col_float， 
-    # S2_12dof_lock_arm_simp_col_float， 
-    # S2_12dof_lock_arm_simp_col
-    # S2_20dof_simp_col_float
-    # S2_20dof_simp_col
-
-    modelName: "G1_29dof" 
-    
-    # 电机状态与命令topic
-    lowStateTopic: "/human_lower_state" 
-    jointCommandsTopic: "/human_lower_command" 
-
-    # 加载模型后是否暂停
-    unPauseService: "/unpause_mujoco" # 启动服务名称
-    initPauseFlag: true # 1是会暂停，0是不会暂停
-
-    # 是否输出模型信息表格
-    modelTableFlag: true # 1是会，0是不会
-
-```
-由于ros2抽象的执行逻辑，修改任何文件后都需要进行编译才能生效
-
-```shell
-colcon build
-```
-
-确认参数无误后使用下面的命令启动仿真
+仓库的主要超参数保存在`config/simulate.yaml`中，在仿真开始前需要确认仿真参数正确。确认参数无误后使用下面的命令启动仿真
 
 ```shell
 source install/setup.bash
 ros2 launch mujoco_simulator_python simulate.launch.py 
 ```
+出现下面的内容
+```shell
+  🔍 自动扫描发现 16 个模型
+
+============================================================
+      MuJoCo 机器人仿真启动器
+============================================================
+
+可用的机器人模型：
+
+  [ 1] G1_12dof
+  [ 2] G1_12dof_box
+  [ 3] G1_29dof_box_foot
+  [ 4] G1_29dof_float
+  [ 5] G1_29dof_full_collision
+  [ 6] Go2
+  [ 7] L1
+  [ 8] S1_20dof_simp_col
+  [ 9] S1_20dof_simp_col_float
+  [10] S2_12dof_lock_arm_simp_col
+  [11] S2_12dof_lock_arm_simp_col_float
+  [12] S2_20dof_simp_col
+  [13] S2_20dof_simp_col_float
+  [14] S3_22dof
+  [15] S3_22dof_noshell
+  [16] S3_22dof_noshell_float
+
+  [ 0] 退出
+
+============================================================
+
+请输入数字选择机器人模型 (0-16): 
+```
+
+输入数字选择要启动的机器人，按下回车确认
 
 成功启动后的界面如下图所示
 
@@ -134,9 +130,9 @@ self.mujoco_unpause_client.call_async(unpause)
 
 ### 3.2 控制仿真环境中的机器人
 
-启动launch后ros2 topic中会出现`/human_lower_command`、`/human_lower_state`两个话题，前者是命令消息，后者是状态消息
+启动launch后ros2 topic中会出现`/low_command`、`/low_state`两个话题，前者是命令消息，后者是状态消息
 
-只需要往`/human_lower_command`中发送`MITJointCommands`类型的消息即可控制机器人关节运动
+只需要往`/low_command`中发送`MITJointCommands`类型的消息即可控制机器人关节运动
 
 需要注意：命令的长度必须与机器人的关节数量一致，否则仿真程序会认为用户运行了错误的控制器，控制命令不予生效。
 此外，命令、状态中电机的顺序分别为MJCF中执行器、传感器的顺序
