@@ -212,7 +212,7 @@ class mujoco_simulator(Node):
             
             # 设置geomgroup（控制哪些几何体组可见）
             # 前3组可见(1)，后3组不可见(0)
-            geomgroup = np.array([1, 0, 0, 0, 0, 0], dtype=np.uint8)
+            geomgroup = np.array([1, 0, 1, 0, 0, 0], dtype=np.uint8)
             
             # 创建雷达句柄（新版本API：不再需要传入mj_data）
             self.lidar_sim = MjLidarWrapper(
@@ -253,38 +253,35 @@ class mujoco_simulator(Node):
                 # 间隔一定step次数进行一次画面渲染
                 if rander_count % self.render_decimation == 0:
                     viewer.sync() 
-                
 
-                # 高程图可视化
-                if self.param["elevation_map"]["enabled"]:
-                    viewer.user_scn.ngeom = self.mj_model.ngeom  # 重置几何体数量，避免重复添加
-                    
-                    # 获取当前 lidar_site 的世界坐标高度
-                    current_robot_pos = self.mj_data.xpos[self.elevation_attach_body_id]
-                    current_robot_rot = self.mj_data.xquat[self.elevation_attach_body_id]
-                    r = R.from_quat([current_robot_rot[1], current_robot_rot[2], current_robot_rot[3], current_robot_rot[0]])
-                    offset_world = r.apply((self.elevation_pos_offset[0], self.elevation_pos_offset[1], self.elevation_pos_offset[2]))
-                    lidar_height = current_robot_pos[2] + offset_world[2]
-                    
-                    # 初始化新添加的几何体（这里是一个小球）
-                    for i in range(self.raycaster.num_x_points * self.raycaster.num_y_points):
-                        # 增加场景中的几何体数量
-                        viewer.user_scn.ngeom += 1
-                        # 计算地形实际高度：lidar高度 - hit_dist
-                        terrain_height = lidar_height - self.elevation_sample_point[i, 2]
-                        sphere_pos = [
-                            self.elevation_sample_point[i, 0],  # x
-                            self.elevation_sample_point[i, 1],  # y
-                            terrain_height                       # z: 地形实际高度
-                        ]
-                        mujoco.mjv_initGeom(
-                            viewer.user_scn.geoms[viewer.user_scn.ngeom - 1],  # 获取最后一个几何体的索引
-                            type=mujoco.mjtGeom.mjGEOM_SPHERE,                 # 几何体类型为球体
-                            size=[0.02, 0, 0],                                 # 小球半径，后两个参数忽略
-                            pos=sphere_pos,                                     # 小球的位置
-                            mat=np.eye(3).flatten(),                           # 朝向矩阵（单位矩阵表示无旋转）
-                            rgba=[1.0, 0.0, 0.0, 1.0]                         # 颜色和透明度（红色不透明）
-                        )
+                    # 高程图可视化
+                    if self.param["elevation_map"]["enabled"]:
+                        viewer.user_scn.ngeom = self.mj_model.ngeom  # 重置几何体数量，避免重复添加
+                        # 获取当前 lidar_site 的世界坐标高度
+                        current_robot_pos = self.mj_data.xpos[self.elevation_attach_body_id]
+                        current_robot_rot = self.mj_data.xquat[self.elevation_attach_body_id]
+                        r = R.from_quat([current_robot_rot[1], current_robot_rot[2], current_robot_rot[3], current_robot_rot[0]])
+                        offset_world = r.apply((self.elevation_pos_offset[0], self.elevation_pos_offset[1], self.elevation_pos_offset[2]))
+                        lidar_height = current_robot_pos[2] + offset_world[2]
+                        # 初始化新添加的几何体（这里是一个小球）
+                        for i in range(self.raycaster.num_x_points * self.raycaster.num_y_points):
+                            # 增加场景中的几何体数量
+                            viewer.user_scn.ngeom += 1
+                            # 计算地形实际高度：lidar高度 - hit_dist
+                            terrain_height = lidar_height - self.elevation_sample_point[i, 2]
+                            sphere_pos = [
+                                self.elevation_sample_point[i, 0],  # x
+                                self.elevation_sample_point[i, 1],  # y
+                                terrain_height                       # z: 地形实际高度
+                            ]
+                            mujoco.mjv_initGeom(
+                                viewer.user_scn.geoms[viewer.user_scn.ngeom - 1],  # 获取最后一个几何体的索引
+                                type=mujoco.mjtGeom.mjGEOM_SPHERE,                 # 几何体类型为球体
+                                size=[0.02, 0, 0],                                 # 小球半径，后两个参数忽略
+                                pos=sphere_pos,                                     # 小球的位置
+                                mat=np.eye(3).flatten(),                           # 朝向矩阵（单位矩阵表示无旋转）
+                                rgba=[1.0, 0.0, 0.0, 1.0]                         # 颜色和透明度（红色不透明）
+                            )
 
                 # 处理ROS回调（非阻塞）
                 rclpy.spin_once(self, timeout_sec=0.0)

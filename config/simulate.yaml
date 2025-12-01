@@ -33,14 +33,14 @@ mujoco_simulator:
     modelTableFlag: false # 1是会,0是不会
 
     # 是否输出log信息（lidar和IMU高度信息）
-    enableLogOutput: true # true是输出,false是不输出
+    enableLogOutput: false # true是输出,false是不输出
 
     g_unit: "g" # 重力单位 可选项: g, m/s^2
 
     pointCloudType: "PointCloud2" # 可选项: PointCloud2, CustomMsg
 
     elevation_map:
-      enabled: false                                           # 设置为 true 来启用此功能
+      enabled: true                                           # 设置为 true 来启用此功能
       topic: "/mujoco_elevation_map"                          # 高程图发布的话题
       attach_link_name: "lidar_site"                         # 以哪一个link为基准
       size: [ 1.0, 1.0 ]                                      # [长, 宽] (米), 对应机器人的前后和左右
