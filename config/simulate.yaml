@@ -47,3 +47,6 @@ mujoco_simulator:
       resolution: 0.1                                         # 分辨率 (米/格)
       update_rate: 60.0                                       # 更新频率 (Hz)
       debug_info: true                                        # 是否发布调试信息
+
+    # 是否启用激光雷达
+    enableLidar: false # true表示启用，false表示禁用

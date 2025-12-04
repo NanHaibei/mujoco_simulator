@@ -199,39 +199,40 @@ class mujoco_simulator(Node):
             self.get_logger().warn(f"计算 torso_link 到 pelvis 偏移失败: {e}")
 
         # ==================== 使用Mujoco-Lidar发布点云信息 ====================
-        # 如果mjcf中有lidar_site，则读取雷达信息
-        lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
-        if lidar_site_id > 0:
-            # 获取传感器的位置
-            self.lidar_site_pos = self.mj_model.site_pos[lidar_site_id].copy()  # [x, y, z]
-            self.lidar_site_quat = self.mj_model.site_quat[lidar_site_id].copy() # [w, x, y, z]
-            
-            # 设置雷达类型
-            self.livox_generator = LivoxGenerator("mid360")
-            self.rays_theta, self.rays_phi = self.livox_generator.sample_ray_angles()
-            
-            # 设置geomgroup（控制哪些几何体组可见）
-            # 前3组可见(1)，后3组不可见(0)
-            geomgroup = np.array([1, 0, 1, 0, 0, 0], dtype=np.uint8)
-            
-            # 创建雷达句柄（新版本API：不再需要传入mj_data）
-            self.lidar_sim = MjLidarWrapper(
-                self.mj_model, 
-                site_name="lidar_site",  # 与MJCF中的<site name="...">匹配
-                backend="cpu", # 貌似GPU后端性能还差一点
-                cutoff_dist=100.0,
-                args={
-                    'bodyexclude': -1,
-                    'geomgroup': geomgroup,
-                    # 'max_candidates': 64,  # GPU后端特定参数：BVH候选节点数
-                    # 'ti_init_args': {'device_memory_GB': 4.0}  # Taichi初始化参数
-                }
-            )
-            # 点云发布者
-            self.point_cloud_pub = self.create_publisher(
-                PointCloud2, "/point_cloud", 100
-            )
-            self.create_timer(1.0/self.param["pointCloudPublishRate"], self.lidar_callback) # 从yaml读取点云发布频率
+        # 如果mjcf中有lidar_site，并且enableLidar标志位为true，则读取雷达信息
+        if self.param.get("enableLidar", True):
+            lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
+            if lidar_site_id > 0:
+                # 获取传感器的位置
+                self.lidar_site_pos = self.mj_model.site_pos[lidar_site_id].copy()  # [x, y, z]
+                self.lidar_site_quat = self.mj_model.site_quat[lidar_site_id].copy() # [w, x, y, z]
+                
+                # 设置雷达类型
+                self.livox_generator = LivoxGenerator("mid360")
+                self.rays_theta, self.rays_phi = self.livox_generator.sample_ray_angles()
+                
+                # 设置geomgroup（控制哪些几何体组可见）
+                # 前3组可见(1)，后3组不可见(0)
+                geomgroup = np.array([1, 0, 1, 0, 0, 0], dtype=np.uint8)
+                
+                # 创建雷达句柄（新版本API：不再需要传入mj_data）
+                self.lidar_sim = MjLidarWrapper(
+                    self.mj_model, 
+                    site_name="lidar_site",  # 与MJCF中的<site name="...">匹配
+                    backend="cpu", # 貌似GPU后端性能还差一点
+                    cutoff_dist=100.0,
+                    args={
+                        'bodyexclude': -1,
+                        'geomgroup': geomgroup,
+                        'max_candidates': 64,  # GPU后端特定参数：BVH候选节点数
+                        'ti_init_args': {'device_memory_GB': 4.0}  # Taichi初始化参数
+                    }
+                )
+                # 点云发布者
+                self.point_cloud_pub = self.create_publisher(
+                    PointCloud2, "/point_cloud", 100
+                )
+                self.create_timer(1.0/self.param["pointCloudPublishRate"], self.lidar_callback) # 从yaml读取点云发布频率
 
         # 计算渲染和状态发布的抽取频率（decimation）
         # 从yaml读取渲染频率
