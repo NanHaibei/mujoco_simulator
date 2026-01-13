@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name="mujoco_lidar",
@@ -6,10 +6,11 @@ setup(
     author="Yufei Jia",
     author_email="jyf23@mails.tsinghua.edu.cn",
     description="A LiDAR sensor designed for MuJoCo",
-    long_description=open("README.md", encoding="utf-8").read(),
+
     long_description_content_type="text/markdown",
     url="https://github.com/TATP-233/MuJoCo-LiDAR.git",
-    packages=["mujoco_lidar"],
+    packages=find_packages(), 
+
     package_data={"mujoco_lidar": ["scan_mode/*.npy"]},
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -25,7 +26,6 @@ setup(
         "matplotlib",
         "zhplot",
         "taichi >= 1.6.0",
-        "tibvh @ git+https://github.com/TATP-233/tibvh.git",
     ],
     extras_require={
         "jax": [

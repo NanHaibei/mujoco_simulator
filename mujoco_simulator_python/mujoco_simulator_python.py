@@ -478,7 +478,8 @@ class mujoco_simulator(Node):
         sensor_pos = np.array(self.sensor_data_list[self.joint_pos_head_id:self.joint_pos_head_id + self.mj_model.nu])
         sensor_vel = np.array(self.sensor_data_list[self.joint_vel_head_id:self.joint_vel_head_id + self.mj_model.nu])
         # 根据PD控制器计算输出力矩
-        data.ctrl = kp_cmd_list * (pos_cmd_list - sensor_pos) + kd_cmd_list * (vel_cmd_list - sensor_vel) + eff_cmd_list
+        ctrl_torque = kp_cmd_list * (pos_cmd_list - sensor_pos) + kd_cmd_list * (vel_cmd_list - sensor_vel) + eff_cmd_list
+        data.ctrl = np.clip(ctrl_torque, -10000.0, 10000.0)
 
     def low_cmd_callback(self, msg: MITJointCommands):
         """控制器命令回调函数
@@ -640,7 +641,7 @@ class mujoco_simulator(Node):
 
                 # 发布一次即可
                 self.broadcaster.sendTransform(t)
-                self.get_logger().info("发布了静态坐标变换 world -> camera_link")
+                self.get_logger().info("发布了静态坐标变换 world -> map")
                 self.map_triggered = True
                 break
 
