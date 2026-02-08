@@ -43,7 +43,8 @@ mujoco_simulator:
       enabled: true                                           # 设置为 true 来启用此功能
       topic: "/elevation/map_array"                          # 高程图发布的话题
       attach_link_name: "lidar_site"                         # 以哪一个link为基准
-      size: [ 1.2, 0.8 ]                                      # [长, 宽] (米), 对应机器人的前后和左右
+      # size: [ 1.55, 1.55 ]                                      # [长, 宽] (米), 对应机器人的前后和左右
+      size: [ 1.35, 0.95 ]                                      # [长, 宽] (米), 对应机器人的前后和左右
       resolution: 0.05                                         # 分辨率 (米/格)
       update_rate: 60.0                                       # 更新频率 (Hz)
       debug_info: true                                        # 是否发布调试信息
