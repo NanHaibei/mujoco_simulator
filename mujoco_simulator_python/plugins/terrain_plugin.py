@@ -31,10 +31,7 @@ class TerrainPlugin(BasePlugin):
         if self.simulator.read_error_flag:
             return
         
-        self._publish_terrain()
-    
-    def _publish_terrain(self):
-        """发布地形可视化信息"""
+        # 发布地形可视化信息
         marker_array = MarkerArray()
         marker_id = 0
         

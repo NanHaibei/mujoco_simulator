@@ -6,27 +6,17 @@
 # class: 插件类名
 
 plugins:
-  # 仿真控制插件 - 必须最优先加载
-  - name: "simulation_control"
+  # 低级命令插件 - 负责初始化 low_cmd_msg，接收控制命令并计算关节力矩
+  - name: "low_command"
     enabled: true
     step_interval: 1
-    module: ".simulation_control_plugin"
-    class: "SimulationControlPlugin"
-    # 插件特有参数
-    unPauseService: "/unpause_mujoco"  # 启动服务名称
-    initPauseFlag: false  # true是会暂停, false是不会暂停
-
-  # PD控制器插件 - 需要尽早加载注册控制回调
-  - name: "pd_controller"
-    enabled: true
-    step_interval: 1
-    module: ".pd_controller_plugin"
-    class: "PdControllerPlugin"
+    module: ".low_command_plugin"
+    class: "LowCommandPlugin"
     # 插件特有参数
     jointCommandsTopic: "/low_command"  # 关节命令话题
     cmdDelay: 0  # 命令延迟（单位是次, 0是没有延迟, 当控制器为50Hz时，一个单位是20ms）
 
-  # 低状态发布插件（电机与IMU状态）- 初始化 low_state_msg 和 low_cmd_msg
+  # 低状态发布插件（电机与IMU状态）- 初始化 low_state_msg
   - name: "low_state"
     enabled: true
     step_interval: 5  # 约100Hz (500Hz/5)

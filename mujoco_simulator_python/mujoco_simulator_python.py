@@ -61,9 +61,7 @@ class mujoco_simulator(Node):
 
         # ==================== 初始化变量 ====================
         # 注意：以下变量由各插件初始化：
-        # - low_state_msg, low_cmd_msg, state_deque: LowStatePlugin
-        # - cmd_deque: PdControllerPlugin
-        # - pause: SimulationControlPlugin
+        # - low_state_msg, state_deque: LowStatePlugin
         # - map_triggered: MapFramePlugin
         
         self.read_error_flag = False
@@ -86,12 +84,30 @@ class mujoco_simulator(Node):
         # 计算渲染和状态发布的抽取频率
         self.render_decimation = int((1.0 / self.mj_model.opt.timestep) / self.param["renderRate"])
 
+        # ==================== 仿真控制 ====================
+        self.pause = self.param.get("initPauseFlag", False)
+        self.unpause_service_name = self.param.get("unPauseService", "/unpause_mujoco")
+        self.unpause_server = self.create_service(
+            Empty, self.unpause_service_name, self._unpause_callback
+        )
+        self.get_logger().info(
+            f"仿真控制已启用，初始暂停: {self.pause}, 服务: {self.unpause_service_name}"
+        )
+
         # ==================== 加载插件系统 ====================
         self.plugins = []
         self._load_plugins(yaml_path)
 
         # 打印 IMU 传感器信息
         self._print_imu_info()
+
+    def _unpause_callback(self, request, response):
+        """仿真启动回调"""
+        self.get_logger().info("Unpause service called")
+        self.pause = False
+        if self.keyframe_count > 0:
+            mujoco.mj_resetDataKeyframe(self.mj_model, self.mj_data, 0)
+        return response
 
     def _load_plugins(self, yaml_path):
         """加载插件系统

@@ -4,3 +4,7 @@ mujoco_simulator:
 
     # 是否输出模型信息表格
     modelTableFlag: false # true是会, false是不会
+
+    # 仿真控制参数
+    unPauseService: "/unpause_mujoco"  # 启动服务名称
+    initPauseFlag: false  # true是会暂停, false是不会暂停

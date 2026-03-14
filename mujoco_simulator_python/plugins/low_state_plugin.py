@@ -2,7 +2,7 @@ from __future__ import annotations
 import copy
 import numpy as np
 from collections import deque
-from mit_msgs.msg import MITLowState, MITJointCommand, MITJointCommands
+from mit_msgs.msg import MITLowState
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,7 +15,6 @@ class LowStatePlugin(BasePlugin):
     """低状态发布插件
     
     负责发布机器人电机与IMU状态信息。
-    同时负责初始化 low_state_msg 和 low_cmd_msg。
     """
     
     def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
@@ -29,10 +28,6 @@ class LowStatePlugin(BasePlugin):
         self.low_state_msg.joint_states.position = [0.0 for _ in range(self.mj_model.nu)]
         self.low_state_msg.joint_states.velocity = [0.0 for _ in range(self.mj_model.nu)]
         self.low_state_msg.joint_states.effort = [0.0 for _ in range(self.mj_model.nu)]
-        
-        # ==================== 初始化 low_cmd_msg ====================
-        self.low_cmd_msg = MITJointCommands()
-        self.low_cmd_msg.commands = [MITJointCommand() for _ in range(self.mj_model.nu)]
         
         # ==================== 初始化 state_deque ====================
         self.state_deque = deque()

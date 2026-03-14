@@ -2,7 +2,7 @@ from __future__ import annotations
 import mujoco
 import numpy as np
 from collections import deque
-from mit_msgs.msg import MITJointCommands
+from mit_msgs.msg import MITJointCommands, MITJointCommand
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -11,25 +11,29 @@ if TYPE_CHECKING:
 from .base_plugin import BasePlugin
 
 
-class PdControllerPlugin(BasePlugin):
-    """PD控制器插件
+class LowCommandPlugin(BasePlugin):
+    """低级命令插件
     
-    负责接收控制命令并计算关节力矩。
+    负责初始化 low_cmd_msg，接收控制命令并计算关节力矩。
     """
     
     def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
-        """初始化PD控制器插件"""
+        """初始化低级命令插件"""
         super().__init__(name, plugin_config, simulator)
         # 读取配置
         self.joint_commands_topic = plugin_config.get("jointCommandsTopic", "/joint_commands")
         self.cmd_delay = plugin_config.get("cmdDelay", 0)
         
+        # ==================== 初始化 low_cmd_msg ====================
+        self.low_cmd_msg = MITJointCommands()
+        self.low_cmd_msg.commands = [MITJointCommand() for _ in range(self.mj_model.nu)]
+        
         # 初始化命令延迟队列
-        self.simulator.cmd_deque = deque()
+        self.cmd_deque = deque()
         
         # 填充延迟队列
         for _ in range(self.cmd_delay):
-            self.simulator.cmd_deque.append(self.simulator.low_cmd_msg)
+            self.cmd_deque.append(self.low_cmd_msg)
         
         # 订阅控制器命令
         self.joint_command_sub = self.simulator.create_subscription(
@@ -40,19 +44,19 @@ class PdControllerPlugin(BasePlugin):
         mujoco.set_mjcb_control(self.pd_controller)
         
         self.simulator.get_logger().info(
-            f"PD控制器插件已启用，命令话题: {self.joint_commands_topic}, 延迟: {self.cmd_delay}"
+            f"低级命令插件已启用，命令话题: {self.joint_commands_topic}, 延迟: {self.cmd_delay}"
         )
     
     def pd_controller(self, model, data):
         """mujoco控制回调，根据命令值计算力矩"""
-        if self.simulator.low_cmd_msg is None:
+        if self.low_cmd_msg is None:
             return
         
-        kp_cmd_list = np.array([cmd.kp for cmd in self.simulator.low_cmd_msg.commands])
-        kd_cmd_list = np.array([cmd.kd for cmd in self.simulator.low_cmd_msg.commands])
-        pos_cmd_list = np.array([cmd.pos for cmd in self.simulator.low_cmd_msg.commands])
-        vel_cmd_list = np.array([cmd.vel for cmd in self.simulator.low_cmd_msg.commands])
-        eff_cmd_list = np.array([cmd.eff for cmd in self.simulator.low_cmd_msg.commands])
+        kp_cmd_list = np.array([cmd.kp for cmd in self.low_cmd_msg.commands])
+        kd_cmd_list = np.array([cmd.kd for cmd in self.low_cmd_msg.commands])
+        pos_cmd_list = np.array([cmd.pos for cmd in self.low_cmd_msg.commands])
+        vel_cmd_list = np.array([cmd.vel for cmd in self.low_cmd_msg.commands])
+        eff_cmd_list = np.array([cmd.eff for cmd in self.low_cmd_msg.commands])
         
         sensor_pos = np.array(self.simulator.sensor_data_list[
             self.simulator.joint_pos_head_id : self.simulator.joint_pos_head_id + self.mj_model.nu
@@ -75,8 +79,8 @@ class PdControllerPlugin(BasePlugin):
             return
         
         # 添加到延迟队列
-        self.simulator.cmd_deque.append(msg)
-        self.simulator.low_cmd_msg = self.simulator.cmd_deque.pop(0)
+        self.cmd_deque.append(msg)
+        self.low_cmd_msg = self.cmd_deque.pop(0)
     
     def execute(self):
         """执行函数 - PD控制在回调中执行，这里不需要做任何事"""
