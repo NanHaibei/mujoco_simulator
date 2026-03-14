@@ -23,7 +23,7 @@ class BasePlugin(ABC):
             simulator: mujoco_simulator 实例的引用
         """
         self.name = name
-        self.config = plugin_config
+        self.plugin_config = plugin_config
         self.simulator = simulator
         self.mj_model = simulator.mj_model
         self.mj_data = simulator.mj_data

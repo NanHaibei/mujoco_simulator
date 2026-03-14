@@ -16,11 +16,51 @@ from tf2_msgs.msg import TFMessage
 from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 from geometry_msgs.msg import TransformStamped
 from collections import deque
+from dataclasses import dataclass, field
+from typing import List, Tuple, Optional, Dict, Any
 import copy
 import os
 
 # 导入插件系统
 from .plugins import *
+
+# ==================== 常量定义 ====================
+INVALID_ID = -1  # 无效ID标识
+
+# 必需的传感器配置：(属性名, 中文描述)
+REQUIRED_SENSORS = [
+    ("joint_pos_head_id", "关节位置传感器"),
+    ("joint_vel_head_id", "关节速度传感器"),
+    ("joint_tor_head_id", "关节力矩传感器"),
+    ("imu_quat_head_id", "四元数传感器"),
+    ("imu_gyro_head_id", "角速度传感器"),
+    ("imu_acc_head_id", "线加速度传感器"),
+]
+
+# head_id 名称映射
+HEAD_ID_NAMES = {
+    "joint_pos_head_id": "joint pos head",
+    "joint_vel_head_id": "joint vel head",
+    "joint_tor_head_id": "joint torque head",
+    "imu_quat_head_id": "imu quat head",
+    "imu_gyro_head_id": "imu gyro head",
+    "imu_acc_head_id": "imu acc head",
+    "real_pos_head_id": "real pos head",
+    "real_vel_head_id": "real vel head",
+}
+
+
+@dataclass
+class SensorHeadIDs:
+    """传感器头ID数据类"""
+    joint_pos: int = INVALID_ID
+    joint_vel: int = INVALID_ID
+    joint_tor: int = INVALID_ID
+    imu_quat: int = INVALID_ID
+    imu_gyro: int = INVALID_ID
+    imu_acc: int = INVALID_ID
+    real_pos: int = INVALID_ID
+    real_vel: int = INVALID_ID
 
 
 class mujoco_simulator(Node):
@@ -56,16 +96,13 @@ class mujoco_simulator(Node):
         self.read_model()
         if self.param["modelTableFlag"]: self.show_model()
 
-        # TF广播器
-        self.tf_broadcaster = TransformBroadcaster(self)
-
         # ==================== 初始化变量 ====================
-        # 注意：以下变量由各插件初始化：
-        # - low_state_msg, state_deque: LowStatePlugin
-        # - map_triggered: MapFramePlugin
-        
         self.read_error_flag = False
         self.mujoco_step_time = 0.0
+
+        
+
+
         
         # 全局仿真步计数器（供插件使用）
         self.step_counter = 0
@@ -84,22 +121,20 @@ class mujoco_simulator(Node):
         # 计算渲染和状态发布的抽取频率
         self.render_decimation = int((1.0 / self.mj_model.opt.timestep) / self.param["renderRate"])
 
-        # ==================== 仿真控制 ====================
+        # ==================== 初始是否暂停 ====================
         self.pause = self.param.get("initPauseFlag", False)
         self.unpause_service_name = self.param.get("unPauseService", "/unpause_mujoco")
         self.unpause_server = self.create_service(
             Empty, self.unpause_service_name, self._unpause_callback
         )
-        self.get_logger().info(
-            f"仿真控制已启用，初始暂停: {self.pause}, 服务: {self.unpause_service_name}"
-        )
+
+        # ==================== 初始化 TF 广播器 ====================
+        self.tf_broadcaster = TransformBroadcaster(self)
 
         # ==================== 加载插件系统 ====================
         self.plugins = []
         self._load_plugins(yaml_path)
 
-        # 打印 IMU 传感器信息
-        self._print_imu_info()
 
     def _unpause_callback(self, request, response):
         """仿真启动回调"""
@@ -173,47 +208,9 @@ class mujoco_simulator(Node):
             except Exception as e:
                 self.get_logger().error(f"插件 {plugin_name} 加载失败: {e}")
 
-    def _print_imu_info(self):
-        """打印IMU传感器信息"""
-        self.imu_attach_body_name = None
-        self.imu_attach_body_id = -1
-        
-        for sensor_id in range(self.mj_model.nsensor):
-            sensor_type = self.mj_model.sensor_type[sensor_id]
-            sensor_name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_SENSOR, sensor_id)
-            
-            if sensor_type == mujoco.mjtSensor.mjSENS_FRAMEQUAT and "imu2" not in sensor_name.lower():
-                site_id = self.mj_model.sensor_objid[sensor_id]
-                if site_id >= 0:
-                    self.imu_attach_body_id = self.mj_model.site_bodyid[site_id]
-                    self.imu_attach_body_name = mujoco.mj_id2name(
-                        self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.imu_attach_body_id
-                    )
-                    site_pos = self.mj_model.site_pos[site_id].copy()
-                    self.imu_pos_offset = (float(site_pos[0]), float(site_pos[1]), float(site_pos[2]))
-                    self.get_logger().info(
-                        f"IMU 传感器附着到 body: {self.imu_attach_body_name}, 位置偏移: {self.imu_pos_offset}"
-                    )
-                    break
-
-        # 打印 torso_link 到 pelvis 的偏移
-        try:
-            torso_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, "torso_link")
-            pelvis_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, "pelvis")
-            if torso_id >= 0 and pelvis_id >= 0:
-                mujoco.mj_forward(self.mj_model, self.mj_data)
-                torso_pos = self.mj_data.xpos[torso_id].copy()
-                pelvis_pos = self.mj_data.xpos[pelvis_id].copy()
-                offset = torso_pos - pelvis_pos
-                self.get_logger().info(
-                    f"torso_link 到 pelvis 的偏移（初始配置）: ({offset[0]:.6f}, {offset[1]:.6f}, {offset[2]:.6f})"
-                )
-        except Exception as e:
-            pass
 
     def run(self):
         """物理仿真主循环, 默认500Hz"""
-        rander_count = 0
         
         # 开启mujoco窗口
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
@@ -226,7 +223,7 @@ class mujoco_simulator(Node):
                     mujoco.mj_step(self.mj_model, self.mj_data)
                 
                 # 间隔一定step次数进行一次画面渲染
-                if rander_count % self.render_decimation == 0:
+                if self.step_counter % self.render_decimation == 0:
                     viewer.sync()
                     
                     # 调用所有插件的可视化方法
@@ -251,7 +248,6 @@ class mujoco_simulator(Node):
 
                 # 递增全局仿真步计数器
                 self.step_counter += 1
-                rander_count += 1
 
                 self.temp_time2 = time.time()
                 self.mujoco_step_time = self.temp_time2 - self.temp_time1
@@ -276,115 +272,303 @@ class mujoco_simulator(Node):
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step)
 
+    def _build_head_id_reverse_map(self) -> Dict[int, str]:
+        """构建 head_id 到名称的反向映射"""
+        reverse_map = {}
+        for attr_name, display_name in HEAD_ID_NAMES.items():
+            head_id = getattr(self, attr_name, INVALID_ID)
+            if head_id != INVALID_ID:
+                reverse_map[head_id] = display_name
+        return reverse_map
+
+    def _validate_required_sensors(self, console: Console) -> bool:
+        """验证必需的传感器是否存在
+        
+        Returns:
+            True 如果所有必需传感器都存在，否则 False
+        """
+        has_error = False
+        
+        for attr_name, description in REQUIRED_SENSORS:
+            if getattr(self, attr_name, INVALID_ID) == INVALID_ID:
+                console.print(f"[bold red][ERROR][/bold red] 未发现{description},请检查模型")
+                has_error = True
+        
+        return has_error
+
     def show_model(self):
-        """输出读取到的机器人模型信息"""
+        """输出读取到的机器人模型信息（重构版本）"""
         console = Console()
 
+        # 标题
         console.print("[bold cyan]------------读取到的环境与模型信息如下------------[/bold cyan]")
-        console.print(f"[bold]model name:[/bold] [green]{self.model_name}[/green]   [bold]time step:[/bold] [yellow]{self.time_step:.6f}s[/yellow]")
+        console.print(
+            f"[bold]model name:[/bold] [green]{self.model_name}[/green]   "
+            f"[bold]time step:[/bold] [yellow]{self.time_step:.6f}s[/yellow]"
+        )
 
-        # Joint 信息
-        joint_table = Table(title="Joints information", 
-                            header_style="bold white",
-                            box=box.HEAVY_EDGE, 
-                            show_lines=False, 
-                            pad_edge=False)
-        for h in ["ID", "name", "posLimit(rad)", "torLimit(Nm)", "friction", "damping"]:
+        # Joint 信息表格
+        joint_table = Table(
+            title="Joints information",
+            header_style="bold white",
+            box=box.HEAVY_EDGE,
+            show_lines=False,
+            pad_edge=False
+        )
+        headers = ["ID", "name", "posLimit(rad)", "torLimit(Nm)", "friction", "damping"]
+        for h in headers:
             joint_table.add_column(h, justify="center", no_wrap=True)
+        
         for i, name in enumerate(self.joint_name):
             pos_range = f"{self.joint_pos_range[i][0]:.2f} ~ {self.joint_pos_range[i][1]:.2f}"
             tor_range = f"{self.joint_torque_range[i][0]:.2f} ~ {self.joint_torque_range[i][1]:.2f}"
             joint_table.add_row(
-                str(i),
-                name,
-                pos_range,
-                tor_range,
-                f"{self.joint_friction[i]:.2f}",
-                f"{self.joint_damping[i]:.2f}"
+                str(i), name, pos_range, tor_range,
+                f"{self.joint_friction[i]:.2f}", f"{self.joint_damping[i]:.2f}"
             )
         console.print(joint_table)
 
-        # Link 信息
-        link_table = Table(title="Links information", 
-                        header_style="bold white", 
-                        box=box.HEAVY_EDGE,
-                        show_lines=False,
-                        pad_edge=False)
+        # Link 信息表格
+        link_table = Table(
+            title="Links information",
+            header_style="bold white",
+            box=box.HEAVY_EDGE,
+            show_lines=False,
+            pad_edge=False
+        )
         for h in ["ID", "name", "mass(kg)"]:
             link_table.add_column(h, justify="center", no_wrap=True)
+        
         for i, name in enumerate(self.link_name):
             link_table.add_row(str(i), name, f"{self.link_mass[i]:.2f}")
         console.print(link_table)
 
-        # Sensor 信息
-        sensor_table = Table(title="Sensors information", 
-                            header_style="bold white", 
-                            box=box.HEAVY_EDGE, 
-                            show_lines=False,
-                            pad_edge=False)
+        # Sensor 信息表格
+        sensor_table = Table(
+            title="Sensors information",
+            header_style="bold white",
+            box=box.HEAVY_EDGE,
+            show_lines=False,
+            pad_edge=False
+        )
         for h in ["ID", "name", "type", "attach", "head"]:
             sensor_table.add_column(h, justify="center", no_wrap=True)
+        
+        # 使用反向映射简化 head_id_name 查找
+        head_id_map = self._build_head_id_reverse_map()
+        
         for i, sensor in enumerate(self.sensor_type):
-            head_id_name = ""
-            if i == self.joint_pos_head_id: head_id_name = "joint pos head"
-            elif i == self.joint_vel_head_id: head_id_name = "joint vel head"
-            elif i == self.joint_tor_head_id: head_id_name = "joint torque head"
-            elif i == self.imu_quat_head_id: head_id_name = "imu quat head"
-            elif i == self.imu_gyro_head_id: head_id_name = "imu gyro head"
-            elif i == self.imu_acc_head_id: head_id_name = "imu acc head"
-            elif i == self.real_pos_head_id: head_id_name = "real pos head"
-            elif i == self.real_vel_head_id: head_id_name = "real vel head"
+            head_id_name = head_id_map.get(i, "")
             sensor_table.add_row(str(i), sensor[0], sensor[1], sensor[2], head_id_name)
         console.print(sensor_table)
 
-        console.print(Panel("[bold green]如果仿真遇到问题,请检查上述信息是否正确,物理仿真进行中...[/bold green]"))
+        # 提示信息
+        console.print(
+            Panel("[bold green]如果仿真遇到问题,请检查上述信息是否正确,物理仿真进行中...[/bold green]")
+        )
 
         # Keyframe 检查
         if self.keyframe_count == 0:
             console.print("[bold yellow][WARN][/bold yellow] 未发现keyframe,请检查模型")
 
-        # 传感器错误检查
-        self.read_error_flag = False
-        def err(msg): 
-            console.print(f"[bold red][ERROR][/bold red] {msg}")
-            return True
-
-        if self.joint_pos_head_id == 999999: self.read_error_flag = err("未发现关节位置传感器,请检查模型")
-        if self.joint_vel_head_id == 999999: self.read_error_flag = err("未发现关节速度传感器,请检查模型")
-        if self.joint_tor_head_id == 999999: self.read_error_flag = err("未发现关节力矩传感器,请检查模型")
-        if self.imu_quat_head_id == 999999: self.read_error_flag = err("未发现四元数传感器,请检查模型")
-        if self.imu_gyro_head_id == 999999: self.read_error_flag = err("未发现角速度传感器,请检查模型")
-        if self.imu_acc_head_id == 999999: self.read_error_flag = err("未发现线加速度传感器,请检查模型")
+        # 传感器错误检查（使用统一的验证方法）
+        self.read_error_flag = self._validate_required_sensors(console)
 
         if self.read_error_flag:
             console.print("[bold red][ERROR][/bold red] 传感器参数缺失,将不会进行ROS通信")
 
-    def read_model(self):
-        """从mjcf中读取模型信息"""
-        # 初始化变量
-        self.joint_name = []
-        self.joint_pos_range = []
-        self.joint_torque_range = []
-        self.joint_friction = []
-        self.joint_damping = []
-        self.link_name = []
-        self.link_mass = []
-        self.sensor_type = []
-        self.joint_pos_head_id = 999999
-        self.joint_vel_head_id = 999999
-        self.joint_tor_head_id = 999999
-        self.imu_quat_head_id = 999999
-        self.imu_gyro_head_id = 999999
-        self.imu_acc_head_id = 999999
-        self.real_pos_head_id = 999999
-        self.real_vel_head_id = 999999
-        self.terrain_pos = []
-        self.terrain_size = []
-        self.terrain_quat = []
-        self.terrain_rgba = []
-        self.terrain_type = []
+    def _get_body_name_by_sensor(self, sensor_id: int) -> Optional[str]:
+        """根据传感器ID获取其附着的body名称"""
+        obj_id = self.mj_model.sensor_objid[sensor_id]
+        body_id = self.mj_model.site_bodyid[obj_id] + 1
+        return mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+
+    def _add_vector_sensor(self, name: str, sensor_type: str, attach: str, 
+                           head_id_attr: str = None, exclude_filter: str = None) -> int:
+        """添加向量类型传感器（展开为 x/y/z 三个分量）
         
-        # 读取模型名称
+        Args:
+            name: 传感器名称
+            sensor_type: 传感器类型描述
+            attach: 附着体名称
+            head_id_attr: 要设置的 head_id 属性名（如 "imu_gyro_head_id"）
+            exclude_filter: 排除过滤字符串（如 "imu2"）
+            
+        Returns:
+            起始的 sensor_type 列表索引
+        """
+        head_idx = len(self.sensor_type)
+        
+        # 如果指定了排除过滤且名称包含该字符串，则不设置 head_id
+        if head_id_attr and (exclude_filter is None or exclude_filter not in name.lower()):
+            setattr(self, head_id_attr, head_idx)
+        
+        # 添加 x/y/z 分量
+        for comp in ['_x', '_y', '_z']:
+            self.sensor_type.append([name + comp, sensor_type, attach])
+        
+        return head_idx
+
+    def _add_quat_sensor(self, name: str, sensor_type: str, attach: str,
+                         head_id_attr: str = None, exclude_filter: str = None) -> int:
+        """添加四元数类型传感器（展开为 w/x/y/z 四个分量）"""
+        head_idx = len(self.sensor_type)
+        
+        if head_id_attr and (exclude_filter is None or exclude_filter not in name.lower()):
+            setattr(self, head_id_attr, head_idx)
+        
+        # 四元数顺序：w, x, y, z
+        for comp in ['_w', '_x', '_y', '_z']:
+            self.sensor_type.append([name + comp, sensor_type, attach])
+        
+        return head_idx
+
+    def _read_joints(self):
+        """读取所有关节信息"""
+        for i in range(self.mj_model.njnt):
+            if self.mj_model.jnt_type[i] == mujoco.mjtJoint.mjJNT_FREE:
+                continue
+            
+            self.joint_name.append(
+                mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, i)
+            )
+            self.joint_pos_range.append(self.mj_model.jnt_range[i])
+            self.joint_torque_range.append(self.mj_model.jnt_actfrcrange[i])
+            
+            dofadr = self.mj_model.jnt_dofadr[i]
+            self.joint_friction.append(self.mj_model.dof_frictionloss[dofadr])
+            self.joint_damping.append(self.mj_model.dof_damping[dofadr])
+
+    def _read_links(self):
+        """读取所有连杆信息"""
+        for i in range(self.mj_model.nbody):
+            name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, i)
+            if name == "world":
+                continue
+            self.link_name.append(name)
+            self.link_mass.append(self.mj_model.body_mass[i])
+
+    def _read_sensors(self):
+        """读取所有传感器信息"""
+        # 简单传感器类型映射：(mujoco_type, type_name, head_id_attr)
+        SIMPLE_SENSOR_TYPES = {
+            mujoco.mjtSensor.mjSENS_JOINTPOS: ("joint pos", "joint_pos_head_id"),
+            mujoco.mjtSensor.mjSENS_JOINTVEL: ("joint vel", "joint_vel_head_id"),
+            mujoco.mjtSensor.mjSENS_JOINTACTFRC: ("joint torque", "joint_tor_head_id"),
+        }
+        
+        for i in range(self.mj_model.nsensor):
+            sensor_name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_SENSOR, i)
+            sensor_type = self.mj_model.sensor_type[i]
+            
+            # 处理简单传感器
+            if sensor_type in SIMPLE_SENSOR_TYPES:
+                type_name, head_attr = SIMPLE_SENSOR_TYPES[sensor_type]
+                # 只在未设置时设置 head_id
+                if getattr(self, head_attr) == INVALID_ID:
+                    setattr(self, head_attr, len(self.sensor_type))
+                
+                attach = mujoco.mj_id2name(
+                    self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, 
+                    self.mj_model.sensor_objid[i]
+                )
+                self.sensor_type.append([sensor_name, type_name, attach])
+            
+            # 处理四元数传感器
+            elif sensor_type == mujoco.mjtSensor.mjSENS_FRAMEQUAT:
+                attach = self._get_body_name_by_sensor(i)
+                self._add_quat_sensor(
+                    sensor_name, "imu quat", attach,
+                    "imu_quat_head_id", "imu2"
+                )
+            
+            # 处理陀螺仪
+            elif sensor_type == mujoco.mjtSensor.mjSENS_GYRO:
+                attach = self._get_body_name_by_sensor(i)
+                self._add_vector_sensor(
+                    sensor_name, "imu gyro", attach,
+                    "imu_gyro_head_id", "imu2"
+                )
+            
+            # 处理加速度计
+            elif sensor_type == mujoco.mjtSensor.mjSENS_ACCELEROMETER:
+                attach = self._get_body_name_by_sensor(i)
+                self._add_vector_sensor(
+                    sensor_name, "imu linear acc", attach,
+                    "imu_acc_head_id", "imu2"
+                )
+            
+            # 处理位置传感器
+            elif sensor_type == mujoco.mjtSensor.mjSENS_FRAMEPOS:
+                attach = self._get_body_name_by_sensor(i)
+                self._add_vector_sensor(sensor_name, "real position", attach, "real_pos_head_id")
+            
+            # 处理速度传感器
+            elif sensor_type == mujoco.mjtSensor.mjSENS_FRAMELINVEL:
+                attach = self._get_body_name_by_sensor(i)
+                self._add_vector_sensor(sensor_name, "real velocity", attach, "real_vel_head_id")
+            
+            # 未知类型
+            else:
+                attach = mujoco.mj_id2name(
+                    self.mj_model, mujoco.mjtObj.mjOBJ_JOINT,
+                    self.mj_model.sensor_objid[i]
+                )
+                self.sensor_type.append([sensor_name, "unknown", attach])
+
+    def _read_terrain(self):
+        """读取障碍物/地形信息"""
+        for geom_id in range(self.mj_model.ngeom):
+            geom_type = self.mj_model.geom_type[geom_id]
+            pos = self.mj_model.geom_pos[geom_id].copy()
+            quat = self.mj_model.geom_quat[geom_id].copy()
+            rgba = self.mj_model.geom_rgba[geom_id].copy()
+            
+            if geom_type == mujoco.mjtGeom.mjGEOM_BOX:
+                self.terrain_pos.append(pos)
+                self.terrain_quat.append(quat)
+                self.terrain_size.append(self.mj_model.geom_size[geom_id].copy() * 2)
+                self.terrain_rgba.append(rgba)
+                self.terrain_type.append('box')
+            
+            elif geom_type == mujoco.mjtGeom.mjGEOM_CYLINDER:
+                size = self.mj_model.geom_size[geom_id].copy()
+                self.terrain_pos.append(pos)
+                self.terrain_quat.append(quat)
+                self.terrain_size.append([size[0] * 2, size[0] * 2, size[1] * 2])
+                self.terrain_rgba.append(rgba)
+                self.terrain_type.append('cylinder')
+
+    def read_model(self):
+        """从mjcf中读取模型信息（重构版本）"""
+        # 初始化列表
+        self.joint_name: List[str] = []
+        self.joint_pos_range: List[np.ndarray] = []
+        self.joint_torque_range: List[np.ndarray] = []
+        self.joint_friction: List[float] = []
+        self.joint_damping: List[float] = []
+        self.link_name: List[str] = []
+        self.link_mass: List[float] = []
+        self.sensor_type: List[List[str]] = []
+        
+        # 初始化 head_id（使用常量 INVALID_ID）
+        self.joint_pos_head_id = INVALID_ID
+        self.joint_vel_head_id = INVALID_ID
+        self.joint_tor_head_id = INVALID_ID
+        self.imu_quat_head_id = INVALID_ID
+        self.imu_gyro_head_id = INVALID_ID
+        self.imu_acc_head_id = INVALID_ID
+        self.real_pos_head_id = INVALID_ID
+        self.real_vel_head_id = INVALID_ID
+        
+        # 初始化地形信息
+        self.terrain_pos: List[np.ndarray] = []
+        self.terrain_size: List[np.ndarray] = []
+        self.terrain_quat: List[np.ndarray] = []
+        self.terrain_rgba: List[np.ndarray] = []
+        self.terrain_type: List[str] = []
+        
+        # 读取基本信息
         self.model_name = self.mj_model.names.split(b'\x00', 1)[0].decode('utf-8')
         self.time_step = self.mj_model.opt.timestep
         
@@ -392,105 +576,13 @@ class mujoco_simulator(Node):
         self.keyframe_count = self.mj_model.nkey
         if self.keyframe_count > 0:
             mujoco.mj_resetDataKeyframe(self.mj_model, self.mj_data, 0)
-
-        # 遍历所有joint
-        for i in range(self.mj_model.njnt):
-            if(self.mj_model.jnt_type[i] == mujoco.mjtJoint.mjJNT_FREE):
-                continue
-            self.joint_name.append((mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, i)))
-            self.joint_pos_range.append(self.mj_model.jnt_range[i])
-            self.joint_torque_range.append(self.mj_model.jnt_actfrcrange[i])
-            joint_dofadr = self.mj_model.jnt_dofadr[i]
-            self.joint_friction.append(self.mj_model.dof_frictionloss[joint_dofadr])
-            self.joint_damping.append(self.mj_model.dof_damping[joint_dofadr])
-
-        # 遍历所有link
-        for i in range(self.mj_model.nbody):
-            if(mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, i) == "world"):
-                continue
-            self.link_name.append((mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, i)))
-            self.link_mass.append(self.mj_model.body_mass[i])
-
-        self.first_link_name = self.link_name[0]
-
-        # 遍历所有sensor
-        for i in range(self.mj_model.nsensor):
-            temp_name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_SENSOR, i)
-            temp_attch = ""
-            if (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_JOINTPOS):
-                temp_type = "joint pos"
-                self.joint_pos_head_id = len(self.sensor_type) if self.joint_pos_head_id == 999999 else self.joint_pos_head_id
-            elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_JOINTVEL):
-                temp_type = "joint vel"
-                self.joint_vel_head_id = len(self.sensor_type) if self.joint_vel_head_id == 999999 else self.joint_vel_head_id
-            elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_JOINTACTFRC):
-                temp_type = "joint torque"
-                self.joint_tor_head_id = len(self.sensor_type) if self.joint_tor_head_id == 999999 else self.joint_tor_head_id
-            elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_FRAMEQUAT):
-                temp_type = "imu quat"
-                temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.mj_model.sensor_objid[i]+1)
-                if "imu2" not in temp_name.lower():
-                    self.imu_quat_head_id = len(self.sensor_type)
-                self.sensor_type.append([temp_name+"_w", temp_type, temp_attch])
-                self.sensor_type.append([temp_name+"_x", temp_type, temp_attch])
-                self.sensor_type.append([temp_name+"_y", temp_type, temp_attch])
-                self.sensor_type.append([temp_name+"_z", temp_type, temp_attch])
-                continue
-            elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_GYRO):
-                temp_type = "imu gyro"
-                temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.mj_model.sensor_objid[i]+1)
-                if "imu2" not in temp_name.lower():
-                    self.imu_gyro_head_id = len(self.sensor_type)
-                self.sensor_type.append([temp_name+"_x", temp_type, temp_attch])
-                self.sensor_type.append([temp_name+"_y", temp_type, temp_attch])
-                self.sensor_type.append([temp_name+"_z", temp_type, temp_attch])
-                continue
-            elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_ACCELEROMETER):
-                temp_type = "imu linear acc"
-                temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.mj_model.sensor_objid[i]+1)
-                if "imu2" not in temp_name.lower():
-                    self.imu_acc_head_id = len(self.sensor_type)
-                self.sensor_type.append([temp_name+"_x", temp_type, temp_attch])
-                self.sensor_type.append([temp_name+"_y", temp_type, temp_attch])
-                self.sensor_type.append([temp_name+"_z", temp_type, temp_attch])
-                continue
-            elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_FRAMEPOS):
-                temp_type = "real position"
-                temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.mj_model.sensor_objid[i]+1)
-                self.real_pos_head_id = len(self.sensor_type)
-                self.sensor_type.append([temp_name+"_x", temp_type, temp_attch])
-                self.sensor_type.append([temp_name+"_y", temp_type, temp_attch])
-                self.sensor_type.append([temp_name+"_z", temp_type, temp_attch])
-                continue
-            elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_FRAMELINVEL):
-                temp_type = "real velocity"
-                temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.mj_model.sensor_objid[i]+1)
-                self.real_vel_head_id = len(self.sensor_type)
-                self.sensor_type.append([temp_name+"_x", temp_type, temp_attch])
-                self.sensor_type.append([temp_name+"_y", temp_type, temp_attch])
-                self.sensor_type.append([temp_name+"_z", temp_type, temp_attch])
-                continue
-            else:
-                temp_type = "unknown"
-            temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, self.mj_model.sensor_objid[i])
-            self.sensor_type.append([temp_name, temp_type, temp_attch])
         
-        # 读取障碍物信息
-        for geom_id in range(self.mj_model.ngeom):
-            geom_type = self.mj_model.geom_type[geom_id]
-            if geom_type == mujoco.mjtGeom.mjGEOM_BOX:
-                self.terrain_pos.append(self.mj_model.geom_pos[geom_id].copy())
-                self.terrain_quat.append(self.mj_model.geom_quat[geom_id].copy())
-                self.terrain_size.append(self.mj_model.geom_size[geom_id].copy() * 2)
-                self.terrain_rgba.append(self.mj_model.geom_rgba[geom_id].copy())
-                self.terrain_type.append('box')
-            elif geom_type == mujoco.mjtGeom.mjGEOM_CYLINDER:
-                self.terrain_pos.append(self.mj_model.geom_pos[geom_id].copy())
-                self.terrain_quat.append(self.mj_model.geom_quat[geom_id].copy())
-                size = self.mj_model.geom_size[geom_id].copy()
-                self.terrain_size.append([size[0] * 2, size[0] * 2, size[1] * 2])
-                self.terrain_rgba.append(self.mj_model.geom_rgba[geom_id].copy())
-                self.terrain_type.append('cylinder')
+        # 分模块读取
+        self._read_joints()
+        self._read_links()
+        self.first_link_name = self.link_name[0] if self.link_name else None
+        self._read_sensors()
+        self._read_terrain()
 
 
 def main(args=None):

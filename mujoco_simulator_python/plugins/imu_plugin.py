@@ -13,6 +13,7 @@ class ImuPlugin(BasePlugin):
     """IMU数据发布插件
     
     负责发布IMU数据用于感知模块，并发布IMU的TF变换。
+    直接从MuJoCo传感器数据读取，不依赖其他插件。
     """
     
     def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
@@ -24,24 +25,49 @@ class ImuPlugin(BasePlugin):
         
         # IMU发布者
         self.imu_pub = self.simulator.create_publisher(Imu, self.imu_topic, 10)
+        
+        # 初始化IMU消息
+        self.imu_msg = Imu()
     
     def execute(self):
         """执行IMU数据发布"""
         if not self.enabled:
             return
         
+        # 检查传感器数据是否有效
+        if self.simulator.read_error_flag:
+            return
+        
         time_stamp = self.simulator.get_clock().now().to_msg()
         
-        # 获取IMU数据
-        imu_data_msg = self.simulator.low_state_msg.imu
-        imu_data_msg.header.frame_id = "imu_frame"
-        imu_data_msg.header.stamp = time_stamp
+        # 更新传感器数据列表
+        sensor_data = list(self.mj_data.sensordata)
+        
+        # 从传感器数据直接读取IMU数据
+        self.imu_msg.header.frame_id = "imu_frame"
+        self.imu_msg.header.stamp = time_stamp
+        
+        # 四元数 (w, x, y, z)
+        self.imu_msg.orientation.w = sensor_data[self.simulator.imu_quat_head_id + 0]
+        self.imu_msg.orientation.x = sensor_data[self.simulator.imu_quat_head_id + 1]
+        self.imu_msg.orientation.y = sensor_data[self.simulator.imu_quat_head_id + 2]
+        self.imu_msg.orientation.z = sensor_data[self.simulator.imu_quat_head_id + 3]
+        
+        # 角速度
+        self.imu_msg.angular_velocity.x = sensor_data[self.simulator.imu_gyro_head_id + 0]
+        self.imu_msg.angular_velocity.y = sensor_data[self.simulator.imu_gyro_head_id + 1]
+        self.imu_msg.angular_velocity.z = sensor_data[self.simulator.imu_gyro_head_id + 2]
+        
+        # 线性加速度
+        self.imu_msg.linear_acceleration.x = sensor_data[self.simulator.imu_acc_head_id + 0]
+        self.imu_msg.linear_acceleration.y = sensor_data[self.simulator.imu_acc_head_id + 1]
+        self.imu_msg.linear_acceleration.z = sensor_data[self.simulator.imu_acc_head_id + 2]
         
         # 根据重力单位进行转换
         if self.g_unit == "g":
-            imu_data_msg.linear_acceleration.x /= 9.80665
-            imu_data_msg.linear_acceleration.y /= 9.80665
-            imu_data_msg.linear_acceleration.z /= 9.80665
+            self.imu_msg.linear_acceleration.x /= 9.80665
+            self.imu_msg.linear_acceleration.y /= 9.80665
+            self.imu_msg.linear_acceleration.z /= 9.80665
         elif self.g_unit == "m/s^2":
             pass
         else:
@@ -50,7 +76,7 @@ class ImuPlugin(BasePlugin):
             )
             return
         
-        self.imu_pub.publish(imu_data_msg)
+        self.imu_pub.publish(self.imu_msg)
         
         # 发布IMU的TF变换
         imu_transform = TransformStamped()

@@ -80,7 +80,7 @@ class LowCommandPlugin(BasePlugin):
         
         # 添加到延迟队列
         self.cmd_deque.append(msg)
-        self.low_cmd_msg = self.cmd_deque.pop(0)
+        self.low_cmd_msg = self.cmd_deque.popleft()
     
     def execute(self):
         """执行函数 - PD控制在回调中执行，这里不需要做任何事"""

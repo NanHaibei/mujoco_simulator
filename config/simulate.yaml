@@ -3,7 +3,7 @@ mujoco_simulator:
     renderRate: 60.0  # Hz，MuJoCo可视化窗口渲染频率
 
     # 是否输出模型信息表格
-    modelTableFlag: false # true是会, false是不会
+    modelTableFlag: true # true是会, false是不会
 
     # 仿真控制参数
     unPauseService: "/unpause_mujoco"  # 启动服务名称
