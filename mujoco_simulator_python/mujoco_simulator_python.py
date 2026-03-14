@@ -160,7 +160,7 @@ class mujoco_simulator(Node):
 
         # ==================== 加载插件系统 ====================
         self.plugins = []
-        self._load_plugins(yaml_path)
+        self._load_plugins()
 
     def run(self):
         """物理仿真主循环, 默认500Hz"""
@@ -228,29 +228,16 @@ class mujoco_simulator(Node):
                 f"runtime[min/mean/max] {self.step_stats.format_summary()} ms"
             )
 
-    def _load_plugins(self, yaml_path):
+    def _load_plugins(self):
         """加载插件系统
         
-        从plugin_config.yaml读取配置并按顺序加载插件
+        从simulate.yaml读取配置并按顺序加载插件
         配置格式: 列表中每个元素包含 path 字段，格式为 "module:class"
         """
         import importlib
         
-        # 读取插件配置文件
-        config_dir = os.path.dirname(yaml_path)
-        plugin_config_path = os.path.join(config_dir, "plugin_config.yaml")
-        
-        try:
-            with open(plugin_config_path, 'r') as f:
-                plugin_config = yaml.safe_load(f)
-        except FileNotFoundError:
-            self.get_logger().warn(f"插件配置文件未找到: {plugin_config_path}")
-            return
-        except yaml.YAMLError as e:
-            self.get_logger().error(f"插件配置解析失败: {e}")
-            return
-        
-        plugins_config = plugin_config.get("plugins", [])
+        # 从 self.param 中读取插件配置
+        plugins_config = self.param.get("plugins", [])
         
         self.get_logger().info(f"开始加载 {len(plugins_config)} 个插件...")
         
