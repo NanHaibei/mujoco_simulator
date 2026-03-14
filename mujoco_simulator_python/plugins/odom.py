@@ -6,18 +6,18 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..mujoco_simulator_python import mujoco_simulator
 
-from .base_plugin import BasePlugin
+from .base import BasePlugin
 
 
-class OdomPlugin(BasePlugin):
+class Odom(BasePlugin):
     """里程计插件
     
     负责发布机器人里程计信息。
     """
     
-    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
+    def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
         """初始化里程计插件"""
-        super().__init__(name, plugin_config, simulator)
+        super().__init__(plugin_config, simulator)
         # 读取配置
         self.odom_topic = plugin_config.get("odomTopic", "/robot_odom")
         
@@ -26,9 +26,6 @@ class OdomPlugin(BasePlugin):
     
     def execute(self):
         """执行里程计发布"""
-        if not self.enabled:
-            return
-        
         # 如果模型读取有错误，则不执行操作
         if self.simulator.read_error_flag:
             return

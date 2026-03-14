@@ -8,18 +8,18 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..mujoco_simulator_python import mujoco_simulator
 
-from .base_plugin import BasePlugin
+from .base import BasePlugin
 
 
-class LowStatePlugin(BasePlugin):
+class LowState(BasePlugin):
     """低状态发布插件
     
     负责发布机器人电机与IMU状态信息。
     """
     
-    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
+    def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
         """初始化低状态插件"""
-        super().__init__(name, plugin_config, simulator)
+        super().__init__(plugin_config, simulator)
         # 读取配置
         self.low_state_topic = plugin_config.get("lowStateTopic", "/low_state")
         
@@ -44,9 +44,6 @@ class LowStatePlugin(BasePlugin):
     
     def execute(self):
         """执行低状态发布"""
-        if not self.enabled:
-            return
-        
         # 更新传感器数据列表
         self.simulator.sensor_data_list = list(self.mj_data.sensordata)
         

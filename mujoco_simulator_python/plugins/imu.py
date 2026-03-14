@@ -1,39 +1,36 @@
 from __future__ import annotations
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu as ImuMsg
 from geometry_msgs.msg import TransformStamped
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..mujoco_simulator_python import mujoco_simulator
 
-from .base_plugin import BasePlugin
+from .base import BasePlugin
 
 
-class ImuPlugin(BasePlugin):
+class Imu(BasePlugin):
     """IMU数据发布插件
     
     负责发布IMU数据用于感知模块，并发布IMU的TF变换。
     直接从MuJoCo传感器数据读取，不依赖其他插件。
     """
     
-    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
+    def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
         """初始化IMU插件"""
-        super().__init__(name, plugin_config, simulator)
+        super().__init__(plugin_config, simulator)
         # 读取配置参数
         self.imu_topic = plugin_config.get("imuTopic", "/imu")
         self.g_unit = plugin_config.get("g_unit", "g")
         
         # IMU发布者
-        self.imu_pub = self.simulator.create_publisher(Imu, self.imu_topic, 10)
+        self.imu_pub = self.simulator.create_publisher(ImuMsg, self.imu_topic, 10)
         
         # 初始化IMU消息
-        self.imu_msg = Imu()
+        self.imu_msg = ImuMsg()
     
     def execute(self):
         """执行IMU数据发布"""
-        if not self.enabled:
-            return
-        
         # 检查传感器数据是否有效
         if self.simulator.read_error_flag:
             return

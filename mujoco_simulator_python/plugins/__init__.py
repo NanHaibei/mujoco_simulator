@@ -1,23 +1,23 @@
-from .base_plugin import BasePlugin
-from .elevation_map_plugin import ElevationMapPlugin
-from .lidar_plugin import LidarPlugin
-from .odom_plugin import OdomPlugin
-from .low_state_plugin import LowStatePlugin
-from .low_command_plugin import LowCommandPlugin
-from .terrain_plugin import TerrainPlugin
-from .joint_state_plugin import JointStatePlugin
-from .map_frame_plugin import MapFramePlugin
-from .imu_plugin import ImuPlugin
+from .base import BasePlugin
+from .elevation_map import ElevationMap
+from .lidar import Lidar
+from .odom import Odom
+from .low_state import LowState
+from .low_command import LowCommand
+from .terrain import Terrain
+from .joint_state import JointStates
+from .map_frame import MapFrame
+from .imu import Imu
 
 __all__ = [
     'BasePlugin',
-    'ElevationMapPlugin',
-    'LidarPlugin', 
-    'OdomPlugin',
-    'LowStatePlugin',
-    'LowCommandPlugin',
-    'TerrainPlugin',
-    'JointStatePlugin',
-    'MapFramePlugin',
-    'ImuPlugin'
+    'ElevationMap',
+    'Lidar', 
+    'Odom',
+    'LowState',
+    'LowCommand',
+    'Terrain',
+    'JointStates',
+    'MapFrame',
+    'Imu'
 ]

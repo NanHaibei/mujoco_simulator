@@ -49,7 +49,6 @@ HEAD_ID_NAMES = {
     "real_vel_head_id": "real vel head",
 }
 
-
 @dataclass
 class SensorHeadIDs:
     """传感器头ID数据类"""
@@ -62,6 +61,45 @@ class SensorHeadIDs:
     real_pos: int = INVALID_ID
     real_vel: int = INVALID_ID
 
+@dataclass
+class StepTimeStats:
+    """仿真步耗时统计"""
+    times: deque = field(default_factory=lambda: deque(maxlen=1000))
+    min_val: float = float('inf')
+    max_val: float = 0.0
+    sum_val: float = 0.0
+    count: int = 0
+    _start_time: float = 0.0
+    _step_time: float = 0.0
+    
+    def tic(self):
+        """开始计时"""
+        self._start_time = time.time()
+    
+    def toc(self):
+        """结束计时并更新统计数据"""
+        self._step_time = time.time() - self._start_time
+        step_time_ms = self._step_time * 1e3
+        self.times.append(step_time_ms)
+        self.min_val = min(self.min_val, step_time_ms)
+        self.max_val = max(self.max_val, step_time_ms)
+        self.sum_val += step_time_ms
+        self.count += 1
+        return self._step_time
+    
+    @property
+    def step_time(self) -> float:
+        """获取最近一次步耗时（秒）"""
+        return self._step_time
+    
+    @property
+    def mean(self) -> float:
+        """计算平均值"""
+        return self.sum_val / self.count if self.count > 0 else 0.0
+    
+    def format_summary(self) -> str:
+        """格式化输出摘要"""
+        return f"{self.min_val:.2f}/{self.mean:.2f}/{self.max_val:.2f}"
 
 class mujoco_simulator(Node):
     """调用mujoco物理仿真, 收发ros2消息
@@ -73,8 +111,8 @@ class mujoco_simulator(Node):
         super().__init__('mujoco_simulator')
 
         # 读取launch中传来的参数
-        self.declare_parameter('yaml_path', " ")  # launch文件中的参数
-        self.declare_parameter('mjcf_path', " ")  # launch文件中的参数
+        self.declare_parameter('yaml_path', " ")
+        self.declare_parameter('mjcf_path', " ")
         yaml_path = self.get_parameter('yaml_path').get_parameter_value().string_value
         mjcf_path = self.get_parameter('mjcf_path').get_parameter_value().string_value
 
@@ -87,32 +125,24 @@ class mujoco_simulator(Node):
                 self.get_logger().error(f"YAML解析失败: {e}")
                 raise
 
-        # 实例化mujoco的model和data
+        # 保存mujoco的model和data
         self.mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
         self.mj_data = mujoco.MjData(self.mj_model)
         self.sensor_data_list = list(self.mj_data.sensordata)
 
-        # 读取模型信息并输出
+        # 读取当前模型信息并输出
         self.read_model()
         if self.param["modelTableFlag"]: self.show_model()
 
         # ==================== 初始化变量 ====================
         self.read_error_flag = False
-        self.mujoco_step_time = 0.0
-
+        self.tf_broadcaster = TransformBroadcaster(self) # 给各个插件使用
         
-
-
-        
-        # 全局仿真步计数器（供插件使用）
+        # 全局仿真步计数器
         self.step_counter = 0
         
-        # step耗时统计变量
-        self.step_times = deque(maxlen=1000)
-        self.step_time_min = float('inf')
-        self.step_time_max = 0.0
-        self.step_time_sum = 0.0
-        self.step_count = 0
+        # step耗时统计
+        self.step_stats = StepTimeStats()
         
         # 日志输出控制
         self.enable_log_output = self.param.get("enableLogOutput", False)
@@ -128,86 +158,9 @@ class mujoco_simulator(Node):
             Empty, self.unpause_service_name, self._unpause_callback
         )
 
-        # ==================== 初始化 TF 广播器 ====================
-        self.tf_broadcaster = TransformBroadcaster(self)
-
         # ==================== 加载插件系统 ====================
         self.plugins = []
         self._load_plugins(yaml_path)
-
-
-    def _unpause_callback(self, request, response):
-        """仿真启动回调"""
-        self.get_logger().info("Unpause service called")
-        self.pause = False
-        if self.keyframe_count > 0:
-            mujoco.mj_resetDataKeyframe(self.mj_model, self.mj_data, 0)
-        return response
-
-    def _load_plugins(self, yaml_path):
-        """加载插件系统
-        
-        从plugin_config.yaml读取配置并按顺序加载插件
-        使用动态导入从配置中的module和class字段加载插件类
-        """
-        import importlib
-        
-        # 读取插件配置文件
-        config_dir = os.path.dirname(yaml_path)
-        plugin_config_path = os.path.join(config_dir, "plugin_config.yaml")
-        
-        try:
-            with open(plugin_config_path, 'r') as f:
-                plugin_config = yaml.safe_load(f)
-        except FileNotFoundError:
-            self.get_logger().warn(f"插件配置文件未找到: {plugin_config_path}")
-            return
-        except yaml.YAMLError as e:
-            self.get_logger().error(f"插件配置解析失败: {e}")
-            return
-        
-        plugins_config = plugin_config.get("plugins", [])
-        
-        self.get_logger().info(f"开始加载 {len(plugins_config)} 个插件...")
-        
-        for plugin_cfg in plugins_config:
-            plugin_name = plugin_cfg.get("name", "")
-            if not plugin_name:
-                continue
-            
-            # 检查是否启用
-            if not plugin_cfg.get("enabled", True):
-                self.get_logger().info(f"插件 {plugin_name} 已禁用，跳过")
-                continue
-            
-            # 从配置中获取模块和类名
-            module_name = plugin_cfg.get("module", "")
-            class_name = plugin_cfg.get("class", "")
-            
-            if not module_name or not class_name:
-                self.get_logger().warn(f"插件 {plugin_name} 缺少 module 或 class 配置")
-                continue
-            
-            # 动态导入插件类
-            try:
-                module = importlib.import_module(module_name, package="mujoco_simulator_python.plugins")
-                plugin_class = getattr(module, class_name)
-                plugin_instance = plugin_class(
-                    name=plugin_name,
-                    plugin_config=plugin_cfg,
-                    simulator=self
-                )
-                self.plugins.append(plugin_instance)
-                self.get_logger().info(
-                    f"插件 {plugin_name} 加载成功 (step_interval={plugin_cfg.get('step_interval', 1)})"
-                )
-            except ImportError as e:
-                self.get_logger().error(f"插件 {plugin_name} 模块导入失败: {e}")
-            except AttributeError as e:
-                self.get_logger().error(f"插件 {plugin_name} 类 {class_name} 未找到: {e}")
-            except Exception as e:
-                self.get_logger().error(f"插件 {plugin_name} 加载失败: {e}")
-
 
     def run(self):
         """物理仿真主循环, 默认500Hz"""
@@ -215,8 +168,8 @@ class mujoco_simulator(Node):
         # 开启mujoco窗口
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
             while viewer.is_running():
-                # 记录当前运行时间
-                self.temp_time1 = time.time()
+                # 开始计时
+                self.step_stats.tic()
 
                 # 进行物理仿真
                 if not self.pause:
@@ -249,28 +202,86 @@ class mujoco_simulator(Node):
                 # 递增全局仿真步计数器
                 self.step_counter += 1
 
-                self.temp_time2 = time.time()
-                self.mujoco_step_time = self.temp_time2 - self.temp_time1
-                
-                # 统计step耗时（转换为毫秒）
-                step_time_ms = self.mujoco_step_time * 1e3
-                self.step_times.append(step_time_ms)
-                self.step_time_min = min(self.step_time_min, step_time_ms)
-                self.step_time_max = max(self.step_time_max, step_time_ms)
-                self.step_time_sum += step_time_ms
-                self.step_count += 1
+                # 结束计时并更新统计数据
+                self.step_stats.toc()
                 
                 # 输出仿真统计日志
-                if self.enable_log_output and self.step_count % self.log_output_interval == 0:
-                    mean_time = self.step_time_sum / self.step_count
-                    self.get_logger().info(
-                        f"runtime[min/mean/max] {self.step_time_min:.2f}/{mean_time:.2f}/{self.step_time_max:.2f} ms"
-                    )
+                self._log_step_stats()
 
                 # sleep 以保证仿真实时
-                time_until_next_step = self.mj_model.opt.timestep - self.mujoco_step_time
+                time_until_next_step = self.mj_model.opt.timestep - self.step_stats.step_time
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step)
+
+    def _unpause_callback(self, request, response):
+        """仿真启动回调"""
+        self.get_logger().info("Unpause service called")
+        self.pause = False
+        if self.keyframe_count > 0:
+            mujoco.mj_resetDataKeyframe(self.mj_model, self.mj_data, 0)
+        return response
+
+    def _log_step_stats(self):
+        """输出仿真步耗时统计日志"""
+        if self.enable_log_output and self.step_stats.count % self.log_output_interval == 0:
+            self.get_logger().info(
+                f"runtime[min/mean/max] {self.step_stats.format_summary()} ms"
+            )
+
+    def _load_plugins(self, yaml_path):
+        """加载插件系统
+        
+        从plugin_config.yaml读取配置并按顺序加载插件
+        配置格式: 列表中每个元素包含 path 字段，格式为 "module:class"
+        """
+        import importlib
+        
+        # 读取插件配置文件
+        config_dir = os.path.dirname(yaml_path)
+        plugin_config_path = os.path.join(config_dir, "plugin_config.yaml")
+        
+        try:
+            with open(plugin_config_path, 'r') as f:
+                plugin_config = yaml.safe_load(f)
+        except FileNotFoundError:
+            self.get_logger().warn(f"插件配置文件未找到: {plugin_config_path}")
+            return
+        except yaml.YAMLError as e:
+            self.get_logger().error(f"插件配置解析失败: {e}")
+            return
+        
+        plugins_config = plugin_config.get("plugins", [])
+        
+        self.get_logger().info(f"开始加载 {len(plugins_config)} 个插件...")
+        
+        for plugin_cfg in plugins_config:
+            # 从 path 字段中解析 module 和 class
+            plugin_path = plugin_cfg.get("path", "")
+            if not plugin_path or ":" not in plugin_path:
+                self.get_logger().warn(f"插件配置 path 格式错误，应为 'module:class': {plugin_path}")
+                continue
+            
+            module_name, class_name = plugin_path.split(":", 1)
+            
+            # 动态导入插件类（使用相对导入）
+            try:
+                # 添加 . 前缀实现相对导入
+                module = importlib.import_module(f".{module_name}", package="mujoco_simulator_python.plugins")
+                plugin_class = getattr(module, class_name)
+                plugin_instance = plugin_class(
+                    plugin_config=plugin_cfg,
+                    simulator=self
+                )
+                self.plugins.append(plugin_instance)
+                self.get_logger().info(
+                    f"插件 {plugin_instance.name} 加载成功 (step_interval={plugin_cfg.get('step_interval', 1)})"
+                )
+            except ImportError as e:
+                self.get_logger().error(f"插件 {module_name}:{class_name} 模块导入失败: {e}")
+            except AttributeError as e:
+                self.get_logger().error(f"插件 {module_name}:{class_name} 类未找到: {e}")
+            except Exception as e:
+                self.get_logger().error(f"插件 {module_name}:{class_name} 加载失败: {e}")
 
     def _build_head_id_reverse_map(self) -> Dict[int, str]:
         """构建 head_id 到名称的反向映射"""

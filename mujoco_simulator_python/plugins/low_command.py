@@ -8,18 +8,18 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..mujoco_simulator_python import mujoco_simulator
 
-from .base_plugin import BasePlugin
+from .base import BasePlugin
 
 
-class LowCommandPlugin(BasePlugin):
+class LowCommand(BasePlugin):
     """低级命令插件
     
     负责初始化 low_cmd_msg，接收控制命令并计算关节力矩。
     """
     
-    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
+    def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
         """初始化低级命令插件"""
-        super().__init__(name, plugin_config, simulator)
+        super().__init__(plugin_config, simulator)
         # 读取配置
         self.joint_commands_topic = plugin_config.get("jointCommandsTopic", "/joint_commands")
         self.cmd_delay = plugin_config.get("cmdDelay", 0)

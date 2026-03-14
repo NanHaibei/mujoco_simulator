@@ -7,19 +7,19 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..mujoco_simulator_python import mujoco_simulator
 
-from .base_plugin import BasePlugin
+from .base import BasePlugin
 
 
-class MapFramePlugin(BasePlugin):
+class MapFrame(BasePlugin):
     """Map坐标系插件
     
     负责处理map坐标系的变换发布。
     监听/tf_static话题，在收到odom坐标系时发布world->map的静态变换。
     """
     
-    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
+    def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
         """初始化Map坐标系插件"""
-        super().__init__(name, plugin_config, simulator)
+        super().__init__(plugin_config, simulator)
         # 初始化状态
         self.map_triggered = False
         

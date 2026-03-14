@@ -9,22 +9,18 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..mujoco_simulator_python import mujoco_simulator
 
-from .base_plugin import BasePlugin
+from .base import BasePlugin
 
 
-class LidarPlugin(BasePlugin):
+class Lidar(BasePlugin):
     """激光雷达插件
     
     负责获取点云信息并发布。
     """
     
-    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
+    def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
         """初始化激光雷达插件"""
-        super().__init__(name, plugin_config, simulator)
-        # 检查是否启用激光雷达
-        if not plugin_config.get("enableLidar", True):
-            self.enabled = False
-            return
+        super().__init__(plugin_config, simulator)
         
         # 查找lidar_site
         lidar_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "lidar_site")
@@ -67,9 +63,6 @@ class LidarPlugin(BasePlugin):
     
     def execute(self):
         """执行点云获取和发布"""
-        if not self.enabled:
-            return
-        
         # 更新雷达射线角度（动态扫描）
         self.rays_theta, self.rays_phi = self.livox_generator.sample_ray_angles()
         

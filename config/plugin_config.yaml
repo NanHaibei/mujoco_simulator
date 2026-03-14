@@ -1,96 +1,59 @@
 # 插件配置文件
 # 配置顺序决定执行优先级（越靠前优先级越高）
-# 每个插件配置包含：name, enabled, step_interval, module, class, 以及插件特有参数
+# path格式: "module:class"，例如 "low_command:LowCommand"
 # step_interval: 每隔多少仿真步执行一次（仿真频率通常为500Hz）
-# module: 插件模块路径（相对于plugins目录）
-# class: 插件类名
 
 plugins:
-  # 低级命令插件 - 负责初始化 low_cmd_msg，接收控制命令并计算关节力矩
-  - name: "low_command"
-    enabled: true
+  # 命令 - 负责初始化 low_cmd_msg，接收控制命令并计算关节力矩
+  - path: "low_command:LowCommand"
+    step_interval: 1 # 由回调函数决定，设置多少都行
+    jointCommandsTopic: "/low_command"
+    cmdDelay: 0
+
+  # 低状态发布（电机与IMU状态）- 初始化 low_state_msg
+  - path: "low_state:LowState"
+    step_interval: 5 
+    lowStateTopic: "/low_state"
+    stateDelay: 0
+    noise_imu_angle_acc: 0.0
+    noise_imu_gravity: 0.0
+    noise_joint_pos: 0.0
+    noise_joint_vel: 0.0
+
+  # 高程图
+  - path: "elevation_map:ElevationMap"
+    step_interval: 8
+    topic: "/elevation/map_array"
+    attach_link_name: "lidar_site"
+    size: [1.35, 0.95]
+    resolution: 0.05
+    noise_elevation_map: 0.0
+
+  # 关节状态发布（用于可视化）
+  - path: "joint_state:JointStates"
+    step_interval: 8
+
+  # 地形可视化
+  - path: "terrain:Terrain"
+    step_interval: 8
+
+  # 里程计
+  - path: "odom:Odom"
+    step_interval: 5
+    odomTopic: "/robot_odom"
+
+  # IMU数据发布（用于感知）
+  - path: "imu:Imu"
+    step_interval: 50
+    imuTopic: "/imu"
+    g_unit: "g"
+
+  # 激光雷达
+  - path: "lidar:Lidar"
+    step_interval: 50
+    pointCloudTopic: "/point_cloud"
+    pointCloudType: "PointCloud2"
+
+  # Map坐标系
+  - path: "map_frame:MapFrame"
     step_interval: 1
-    module: ".low_command_plugin"
-    class: "LowCommandPlugin"
-    # 插件特有参数
-    jointCommandsTopic: "/low_command"  # 关节命令话题
-    cmdDelay: 0  # 命令延迟（单位是次, 0是没有延迟, 当控制器为50Hz时，一个单位是20ms）
-
-  # 低状态发布插件（电机与IMU状态）- 初始化 low_state_msg
-  - name: "low_state"
-    enabled: true
-    step_interval: 5  # 约100Hz (500Hz/5)
-    module: ".low_state_plugin"
-    class: "LowStatePlugin"
-    # 插件特有参数
-    lowStateTopic: "/low_state"  # 电机状态话题
-    stateDelay: 0  # 状态延迟（单位是次, 0是没有延迟, 当仿真频率为500Hz时，一个单位是2ms）
-    # 传感器噪声参数
-    noise_imu_angle_acc: 0.0  # IMU角速度噪声
-    noise_imu_gravity: 0.0  # IMU姿态噪声（弧度）
-    noise_joint_pos: 0.0  # 关节位置噪声
-    noise_joint_vel: 0.0  # 关节速度噪声
-
-  # 关节状态发布插件（用于可视化）
-  - name: "joint_state"
-    enabled: true
-    step_interval: 8  # 约62.5Hz (500Hz/8)
-    module: ".joint_state_plugin"
-    class: "JointStatePlugin"
-
-  # 地形可视化插件
-  - name: "terrain"
-    enabled: true
-    step_interval: 8  # 约62.5Hz (500Hz/8)
-    module: ".terrain_plugin"
-    class: "TerrainPlugin"
-
-  # 里程计插件
-  - name: "odom"
-    enabled: true
-    step_interval: 5  # 约100Hz (500Hz/5)
-    module: ".odom_plugin"
-    class: "OdomPlugin"
-    # 插件特有参数
-    odomTopic: "/robot_odom"  # 里程计信息话题
-
-  # 高程图插件
-  - name: "elevation_map"
-    enabled: true
-    step_interval: 8  # 约62.5Hz (500Hz/8)
-    module: ".elevation_map_plugin"
-    class: "ElevationMapPlugin"
-    # 插件特有参数
-    topic: "/elevation/map_array"  # 高程图发布的话题
-    attach_link_name: "lidar_site"  # 以哪一个link为基准
-    size: [1.35, 0.95]  # [长, 宽] (米), 对应机器人的前后和左右
-    resolution: 0.05  # 分辨率 (米/格)
-    noise_elevation_map: 0.0  # 高程图噪声
-
-  # IMU数据发布插件（用于感知）
-  - name: "imu"
-    enabled: true
-    step_interval: 50  # 约10Hz (500Hz/50)
-    module: ".imu_plugin"
-    class: "ImuPlugin"
-    # 插件特有参数
-    imuTopic: "/imu"  # IMU话题
-    g_unit: "g"  # 重力单位 可选项: g, m/s^2
-
-  # 激光雷达插件
-  - name: "lidar"
-    enabled: true
-    step_interval: 50  # 约10Hz (500Hz/50)
-    module: ".lidar_plugin"
-    class: "LidarPlugin"
-    # 插件特有参数
-    enableLidar: false  # true表示启用，false表示禁用
-    pointCloudTopic: "/point_cloud"  # 点云话题
-    pointCloudType: "PointCloud2"  # 可选项: PointCloud2, CustomMsg
-
-  # Map坐标系插件
-  - name: "map_frame"
-    enabled: true
-    step_interval: 1  # 由回调触发，step_interval不影响
-    module: ".map_frame_plugin"
-    class: "MapFramePlugin"

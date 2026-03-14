@@ -5,18 +5,18 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..mujoco_simulator_python import mujoco_simulator
 
-from .base_plugin import BasePlugin
+from .base import BasePlugin
 
 
-class TerrainPlugin(BasePlugin):
+class Terrain(BasePlugin):
     """地形可视化插件
     
     负责发布地形障碍物信息用于可视化。
     """
     
-    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
+    def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
         """初始化地形可视化插件"""
-        super().__init__(name, plugin_config, simulator)
+        super().__init__(plugin_config, simulator)
         # 创建发布者
         self.marker_array_pub = self.simulator.create_publisher(
             MarkerArray, '/visualization_marker_array', 10
@@ -24,9 +24,6 @@ class TerrainPlugin(BasePlugin):
     
     def execute(self):
         """执行地形可视化发布"""
-        if not self.enabled:
-            return
-        
         # 如果模型读取有错误，则不执行操作
         if self.simulator.read_error_flag:
             return

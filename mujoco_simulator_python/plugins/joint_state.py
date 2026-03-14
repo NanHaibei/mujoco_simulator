@@ -5,18 +5,18 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..mujoco_simulator_python import mujoco_simulator
 
-from .base_plugin import BasePlugin
+from .base import BasePlugin
 
 
-class JointStatePlugin(BasePlugin):
+class JointStates(BasePlugin):
     """关节状态发布插件
     
     负责发布关节状态用于可视化（如 rviz）。
     """
     
-    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
+    def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
         """初始化关节状态插件"""
-        super().__init__(name, plugin_config, simulator)
+        super().__init__(plugin_config, simulator)
         # 创建发布者
         self.joint_state_pub = self.simulator.create_publisher(
             JointState, "/joint_states", 10

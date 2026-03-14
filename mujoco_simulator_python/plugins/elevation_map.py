@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..mujoco_simulator_python import mujoco_simulator
 
-from .base_plugin import BasePlugin
+from .base import BasePlugin
 
 
 class RayCaster:
@@ -153,15 +153,15 @@ class RayCaster:
         return world_points, X.shape
 
 
-class ElevationMapPlugin(BasePlugin):
+class ElevationMap(BasePlugin):
     """高程图插件
     
     负责生成和发布高程图信息。
     """
     
-    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
+    def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
         """初始化高程图插件"""
-        super().__init__(name, plugin_config, simulator)
+        super().__init__(plugin_config, simulator)
         # 从插件配置中读取高程图参数
         self.map_topic = plugin_config.get("topic", "/elevation/map_array")
         self.map_size = plugin_config.get("size", [1.35, 0.95])
@@ -207,9 +207,6 @@ class ElevationMapPlugin(BasePlugin):
     
     def execute(self):
         """执行高程图生成和发布"""
-        if not self.enabled:
-            return
-        
         # 获取采样点
         self.elevation_sample_point = self.raycaster.update_elevation_data()
         
@@ -228,9 +225,6 @@ class ElevationMapPlugin(BasePlugin):
     
     def visualize(self, viewer):
         """高程图可视化（在渲染时调用）"""
-        if not self.enabled:
-            return
-        
         if self.elevation_attach_body_id < 0:
             return
         
