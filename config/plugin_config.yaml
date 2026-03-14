@@ -12,6 +12,9 @@ plugins:
     step_interval: 1
     module: ".simulation_control_plugin"
     class: "SimulationControlPlugin"
+    # 插件特有参数
+    unPauseService: "/unpause_mujoco"  # 启动服务名称
+    initPauseFlag: false  # true是会暂停, false是不会暂停
 
   # PD控制器插件 - 需要尽早加载注册控制回调
   - name: "pd_controller"
@@ -19,6 +22,9 @@ plugins:
     step_interval: 1
     module: ".pd_controller_plugin"
     class: "PdControllerPlugin"
+    # 插件特有参数
+    jointCommandsTopic: "/low_command"  # 关节命令话题
+    cmdDelay: 0  # 命令延迟（单位是次, 0是没有延迟, 当控制器为50Hz时，一个单位是20ms）
 
   # 低状态发布插件（电机与IMU状态）- 初始化 low_state_msg 和 low_cmd_msg
   - name: "low_state"
@@ -26,11 +32,19 @@ plugins:
     step_interval: 5  # 约100Hz (500Hz/5)
     module: ".low_state_plugin"
     class: "LowStatePlugin"
+    # 插件特有参数
+    lowStateTopic: "/low_state"  # 电机状态话题
+    stateDelay: 0  # 状态延迟（单位是次, 0是没有延迟, 当仿真频率为500Hz时，一个单位是2ms）
+    # 传感器噪声参数
+    noise_imu_angle_acc: 0.0  # IMU角速度噪声
+    noise_imu_gravity: 0.0  # IMU姿态噪声（弧度）
+    noise_joint_pos: 0.0  # 关节位置噪声
+    noise_joint_vel: 0.0  # 关节速度噪声
 
   # 关节状态发布插件（用于可视化）
   - name: "joint_state"
     enabled: true
-    step_interval: 8  # 约62.5Hz (500Hz/8)，由定时器调用，step_interval不影响
+    step_interval: 8  # 约62.5Hz (500Hz/8)
     module: ".joint_state_plugin"
     class: "JointStatePlugin"
 
@@ -47,6 +61,8 @@ plugins:
     step_interval: 5  # 约100Hz (500Hz/5)
     module: ".odom_plugin"
     class: "OdomPlugin"
+    # 插件特有参数
+    odomTopic: "/robot_odom"  # 里程计信息话题
 
   # 高程图插件
   - name: "elevation_map"
@@ -54,6 +70,22 @@ plugins:
     step_interval: 8  # 约62.5Hz (500Hz/8)
     module: ".elevation_map_plugin"
     class: "ElevationMapPlugin"
+    # 插件特有参数
+    topic: "/elevation/map_array"  # 高程图发布的话题
+    attach_link_name: "lidar_site"  # 以哪一个link为基准
+    size: [1.35, 0.95]  # [长, 宽] (米), 对应机器人的前后和左右
+    resolution: 0.05  # 分辨率 (米/格)
+    noise_elevation_map: 0.0  # 高程图噪声
+
+  # IMU数据发布插件（用于感知）
+  - name: "imu"
+    enabled: true
+    step_interval: 50  # 约10Hz (500Hz/50)
+    module: ".imu_plugin"
+    class: "ImuPlugin"
+    # 插件特有参数
+    imuTopic: "/imu"  # IMU话题
+    g_unit: "g"  # 重力单位 可选项: g, m/s^2
 
   # 激光雷达插件
   - name: "lidar"
@@ -61,13 +93,10 @@ plugins:
     step_interval: 50  # 约10Hz (500Hz/50)
     module: ".lidar_plugin"
     class: "LidarPlugin"
-
-  # 日志输出插件
-  - name: "log"
-    enabled: true
-    step_interval: 50  # 约10Hz (500Hz/50)
-    module: ".log_plugin"
-    class: "LogPlugin"
+    # 插件特有参数
+    enableLidar: false  # true表示启用，false表示禁用
+    pointCloudTopic: "/point_cloud"  # 点云话题
+    pointCloudType: "PointCloud2"  # 可选项: PointCloud2, CustomMsg
 
   # Map坐标系插件
   - name: "map_frame"

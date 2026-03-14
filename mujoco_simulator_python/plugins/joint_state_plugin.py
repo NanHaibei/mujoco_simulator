@@ -1,4 +1,9 @@
+from __future__ import annotations
 from sensor_msgs.msg import JointState
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..mujoco_simulator_python import mujoco_simulator
 
 from .base_plugin import BasePlugin
 
@@ -9,18 +14,15 @@ class JointStatePlugin(BasePlugin):
     负责发布关节状态用于可视化（如 rviz）。
     """
     
-    def init(self):
+    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
         """初始化关节状态插件"""
+        super().__init__(name, plugin_config, simulator)
         # 创建发布者
         self.joint_state_pub = self.simulator.create_publisher(
             JointState, "/joint_states", 10
         )
-        
-        # 设置定时器（60Hz发布）
-        self.update_rate = 60.0
-        self.simulator.create_timer(1.0 / self.update_rate, self._publish_joint_states)
     
-    def _publish_joint_states(self):
+    def execute(self):
         """发布关节状态"""
         if self.simulator.read_error_flag:
             return
@@ -38,7 +40,3 @@ class JointStatePlugin(BasePlugin):
             self.simulator.joint_tor_head_id : self.simulator.joint_tor_head_id + self.mj_model.nu
         ]
         self.joint_state_pub.publish(joint_state)
-    
-    def execute(self):
-        """执行函数 - 由定时器调用，不需要在这里实现"""
-        pass

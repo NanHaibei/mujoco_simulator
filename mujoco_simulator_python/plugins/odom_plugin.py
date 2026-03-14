@@ -1,5 +1,10 @@
+from __future__ import annotations
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..mujoco_simulator_python import mujoco_simulator
 
 from .base_plugin import BasePlugin
 
@@ -10,10 +15,11 @@ class OdomPlugin(BasePlugin):
     负责发布机器人里程计信息。
     """
     
-    def init(self):
+    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
         """初始化里程计插件"""
+        super().__init__(name, plugin_config, simulator)
         # 读取配置
-        self.odom_topic = self.simulator.param.get("odomTopic", "/robot_odom")
+        self.odom_topic = plugin_config.get("odomTopic", "/robot_odom")
         
         # 创建发布者
         self.odom_pub = self.simulator.create_publisher(Odometry, self.odom_topic, 10)

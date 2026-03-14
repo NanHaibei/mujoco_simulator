@@ -1,4 +1,9 @@
+from __future__ import annotations
 from visualization_msgs.msg import Marker, MarkerArray
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..mujoco_simulator_python import mujoco_simulator
 
 from .base_plugin import BasePlugin
 
@@ -9,8 +14,9 @@ class TerrainPlugin(BasePlugin):
     负责发布地形障碍物信息用于可视化。
     """
     
-    def init(self):
+    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
         """初始化地形可视化插件"""
+        super().__init__(name, plugin_config, simulator)
         # 创建发布者
         self.marker_array_pub = self.simulator.create_publisher(
             MarkerArray, '/visualization_marker_array', 10

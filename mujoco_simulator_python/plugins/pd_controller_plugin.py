@@ -1,7 +1,12 @@
+from __future__ import annotations
 import mujoco
 import numpy as np
 from collections import deque
 from mit_msgs.msg import MITJointCommands
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..mujoco_simulator_python import mujoco_simulator
 
 from .base_plugin import BasePlugin
 
@@ -12,11 +17,12 @@ class PdControllerPlugin(BasePlugin):
     负责接收控制命令并计算关节力矩。
     """
     
-    def init(self):
+    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
         """初始化PD控制器插件"""
+        super().__init__(name, plugin_config, simulator)
         # 读取配置
-        self.joint_commands_topic = self.simulator.param.get("jointCommandsTopic", "/joint_commands")
-        self.cmd_delay = self.simulator.param.get("cmdDelay", 0)
+        self.joint_commands_topic = plugin_config.get("jointCommandsTopic", "/joint_commands")
+        self.cmd_delay = plugin_config.get("cmdDelay", 0)
         
         # 初始化命令延迟队列
         self.simulator.cmd_deque = deque()

@@ -1,4 +1,9 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..mujoco_simulator_python import mujoco_simulator
 
 
 class BasePlugin(ABC):
@@ -8,7 +13,7 @@ class BasePlugin(ABC):
     插件在仿真主循环中被调用，可以根据 step_interval 控制执行频率。
     """
     
-    def __init__(self, name: str, plugin_config: dict, simulator):
+    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
         """
         初始化插件
         
@@ -22,19 +27,8 @@ class BasePlugin(ABC):
         self.simulator = simulator
         self.mj_model = simulator.mj_model
         self.mj_data = simulator.mj_data
-        self.step_interval = plugin_config.get("step_interval", 1)  # 执行间隔，默认每步都执行
-        self.step_counter = 0
-        self.enabled = plugin_config.get("enabled", True)
-        
-        # 调用子类的初始化方法
-        self.init()
-    
-    def init(self):
-        """子类重写此方法进行初始化
-        
-        在构造函数中被调用，用于初始化插件特有的资源。
-        """
-        pass
+        self.step_interval = plugin_config["step_interval"]
+        self.enabled = plugin_config["enabled"]
     
     @abstractmethod
     def execute(self):
@@ -49,14 +43,12 @@ class BasePlugin(ABC):
         """
         判断当前步是否应该执行
         
+        使用全局 step_counter 判断
+        
         Returns:
             bool: 是否执行
         """
-        self.step_counter += 1
-        if self.step_counter >= self.step_interval:
-            self.step_counter = 0
-            return True
-        return False
+        return self.simulator.step_counter % self.step_interval == 0
     
     def update(self):
         """
@@ -67,14 +59,6 @@ class BasePlugin(ABC):
         if self.enabled and self.should_execute():
             self.execute()
     
-    def reset(self):
-        """
-        重置插件状态
-        
-        子类可以重写此方法以在仿真重置时执行特定操作。
-        """
-        self.step_counter = 0
-    
     def visualize(self, viewer):
         """
         可视化函数（可选）
@@ -84,5 +68,15 @@ class BasePlugin(ABC):
         
         Args:
             viewer: mujoco viewer实例
+        """
+        pass
+    
+    def log(self):
+        """
+        日志输出函数（可选）
+        
+        在execute()执行后调用，用于输出插件的调试/状态日志。
+        子类可以重写此方法实现自定义日志输出。
+        只有当 simulator.enable_log_output 为 True 时才会被调用。
         """
         pass

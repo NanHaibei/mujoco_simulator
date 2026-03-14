@@ -1,8 +1,13 @@
+from __future__ import annotations
 import mujoco
 import numpy as np
-from sensor_msgs.msg import PointCloud2, PointField, Imu
+from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header
 from geometry_msgs.msg import TransformStamped
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..mujoco_simulator_python import mujoco_simulator
 
 from .base_plugin import BasePlugin
 
@@ -13,10 +18,11 @@ class LidarPlugin(BasePlugin):
     负责获取点云信息并发布。
     """
     
-    def init(self):
+    def __init__(self, name: str, plugin_config: dict, simulator: mujoco_simulator):
         """初始化激光雷达插件"""
+        super().__init__(name, plugin_config, simulator)
         # 检查是否启用激光雷达
-        if not self.simulator.param.get("enableLidar", True):
+        if not plugin_config.get("enableLidar", True):
             self.enabled = False
             return
         
@@ -58,9 +64,6 @@ class LidarPlugin(BasePlugin):
         self.point_cloud_pub = self.simulator.create_publisher(
             PointCloud2, "/point_cloud", 100
         )
-        
-        # IMU发布者（用于感知）
-        self.imu_pub = self.simulator.create_publisher(Imu, "/imu", 10)
     
     def execute(self):
         """执行点云获取和发布"""
@@ -111,34 +114,3 @@ class LidarPlugin(BasePlugin):
         t.transform.rotation.y = self.lidar_site_quat[2]
         t.transform.rotation.z = self.lidar_site_quat[3]
         self.simulator.tf_broadcaster.sendTransform(t)
-        
-        # 单独发布imu数据给感知用
-        imu_data_msg = self.simulator.low_state_msg.imu
-        imu_data_msg.header.frame_id = "imu_frame"
-        imu_data_msg.header.stamp = time_stamp
-        if self.simulator.param.get("g_unit", "g") == "g":
-            imu_data_msg.linear_acceleration.x /= 9.80665
-            imu_data_msg.linear_acceleration.y /= 9.80665
-            imu_data_msg.linear_acceleration.z /= 9.80665
-        elif self.simulator.param.get("g_unit", "g") == "m/s^2":
-            pass
-        else:
-            self.simulator.get_logger().error(
-                f"未知的重力单位: {self.simulator.param.get('g_unit', 'g')}, 请检查参数设置"
-            )
-            return
-        self.imu_pub.publish(imu_data_msg)
-        
-        # 发布IMU的TF变换
-        imu_transform = TransformStamped()
-        imu_transform.header.stamp = time_stamp
-        imu_transform.header.frame_id = self.simulator.first_link_name
-        imu_transform.child_frame_id = "imu_frame"
-        imu_transform.transform.translation.x = 0.0
-        imu_transform.transform.translation.y = 0.0
-        imu_transform.transform.translation.z = 0.0
-        imu_transform.transform.rotation.w = 1.0
-        imu_transform.transform.rotation.x = 0.0
-        imu_transform.transform.rotation.y = 0.0
-        imu_transform.transform.rotation.z = 0.0
-        self.simulator.tf_broadcaster.sendTransform(imu_transform)

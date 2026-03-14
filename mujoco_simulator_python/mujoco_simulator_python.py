@@ -69,12 +69,19 @@ class mujoco_simulator(Node):
         self.read_error_flag = False
         self.mujoco_step_time = 0.0
         
+        # 全局仿真步计数器（供插件使用）
+        self.step_counter = 0
+        
         # step耗时统计变量
         self.step_times = deque(maxlen=1000)
         self.step_time_min = float('inf')
         self.step_time_max = 0.0
         self.step_time_sum = 0.0
         self.step_count = 0
+        
+        # 日志输出控制
+        self.enable_log_output = self.param.get("enableLogOutput", False)
+        self.log_output_interval = self.param.get("logOutputInterval", 50)  # 默认每50步输出一次
 
         # 计算渲染和状态发布的抽取频率
         self.render_decimation = int((1.0 / self.mj_model.opt.timestep) / self.param["renderRate"])
@@ -220,9 +227,14 @@ class mujoco_simulator(Node):
                 for plugin in self.plugins:
                     try:
                         plugin.update()
+                        # 执行插件的log输出
+                        if self.enable_log_output and plugin.should_execute():
+                            plugin.log()
                     except Exception as e:
                         self.get_logger().error(f"插件 {plugin.name} 执行失败: {e}")
 
+                # 递增全局仿真步计数器
+                self.step_counter += 1
                 rander_count += 1
 
                 self.temp_time2 = time.time()
@@ -235,6 +247,13 @@ class mujoco_simulator(Node):
                 self.step_time_max = max(self.step_time_max, step_time_ms)
                 self.step_time_sum += step_time_ms
                 self.step_count += 1
+                
+                # 输出仿真统计日志
+                if self.enable_log_output and self.step_count % self.log_output_interval == 0:
+                    mean_time = self.step_time_sum / self.step_count
+                    self.get_logger().info(
+                        f"runtime[min/mean/max] {self.step_time_min:.2f}/{mean_time:.2f}/{self.step_time_max:.2f} ms"
+                    )
 
                 # sleep 以保证仿真实时
                 time_until_next_step = self.mj_model.opt.timestep - self.mujoco_step_time
@@ -297,9 +316,6 @@ class mujoco_simulator(Node):
             elif i == self.imu_quat_head_id: head_id_name = "imu quat head"
             elif i == self.imu_gyro_head_id: head_id_name = "imu gyro head"
             elif i == self.imu_acc_head_id: head_id_name = "imu acc head"
-            elif i == self.imu2_quat_head_id: head_id_name = "imu2 quat head"
-            elif i == self.imu2_gyro_head_id: head_id_name = "imu2 gyro head"
-            elif i == self.imu2_acc_head_id: head_id_name = "imu2 acc head"
             elif i == self.real_pos_head_id: head_id_name = "real pos head"
             elif i == self.real_vel_head_id: head_id_name = "real vel head"
             sensor_table.add_row(str(i), sensor[0], sensor[1], sensor[2], head_id_name)
@@ -344,9 +360,6 @@ class mujoco_simulator(Node):
         self.imu_quat_head_id = 999999
         self.imu_gyro_head_id = 999999
         self.imu_acc_head_id = 999999
-        self.imu2_quat_head_id = 999999
-        self.imu2_gyro_head_id = 999999
-        self.imu2_acc_head_id = 999999
         self.real_pos_head_id = 999999
         self.real_vel_head_id = 999999
         self.terrain_pos = []
@@ -400,9 +413,7 @@ class mujoco_simulator(Node):
             elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_FRAMEQUAT):
                 temp_type = "imu quat"
                 temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.mj_model.sensor_objid[i]+1)
-                if "imu2" in temp_name.lower():
-                    self.imu2_quat_head_id = len(self.sensor_type)
-                else:
+                if "imu2" not in temp_name.lower():
                     self.imu_quat_head_id = len(self.sensor_type)
                 self.sensor_type.append([temp_name+"_w", temp_type, temp_attch])
                 self.sensor_type.append([temp_name+"_x", temp_type, temp_attch])
@@ -412,9 +423,7 @@ class mujoco_simulator(Node):
             elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_GYRO):
                 temp_type = "imu gyro"
                 temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.mj_model.sensor_objid[i]+1)
-                if "imu2" in temp_name.lower():
-                    self.imu2_gyro_head_id = len(self.sensor_type)
-                else:
+                if "imu2" not in temp_name.lower():
                     self.imu_gyro_head_id = len(self.sensor_type)
                 self.sensor_type.append([temp_name+"_x", temp_type, temp_attch])
                 self.sensor_type.append([temp_name+"_y", temp_type, temp_attch])
@@ -423,9 +432,7 @@ class mujoco_simulator(Node):
             elif (self.mj_model.sensor_type[i] == mujoco.mjtSensor.mjSENS_ACCELEROMETER):
                 temp_type = "imu linear acc"
                 temp_attch = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, self.mj_model.sensor_objid[i]+1)
-                if "imu2" in temp_name.lower():
-                    self.imu2_acc_head_id = len(self.sensor_type)
-                else:
+                if "imu2" not in temp_name.lower():
                     self.imu_acc_head_id = len(self.sensor_type)
                 self.sensor_type.append([temp_name+"_x", temp_type, temp_attch])
                 self.sensor_type.append([temp_name+"_y", temp_type, temp_attch])
