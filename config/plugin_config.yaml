@@ -1,0 +1,77 @@
+# 插件配置文件
+# 配置顺序决定执行优先级（越靠前优先级越高）
+# 每个插件配置包含：name, enabled, step_interval, module, class, 以及插件特有参数
+# step_interval: 每隔多少仿真步执行一次（仿真频率通常为500Hz）
+# module: 插件模块路径（相对于plugins目录）
+# class: 插件类名
+
+plugins:
+  # 仿真控制插件 - 必须最优先加载
+  - name: "simulation_control"
+    enabled: true
+    step_interval: 1
+    module: ".simulation_control_plugin"
+    class: "SimulationControlPlugin"
+
+  # PD控制器插件 - 需要尽早加载注册控制回调
+  - name: "pd_controller"
+    enabled: true
+    step_interval: 1
+    module: ".pd_controller_plugin"
+    class: "PdControllerPlugin"
+
+  # 低状态发布插件（电机与IMU状态）- 初始化 low_state_msg 和 low_cmd_msg
+  - name: "low_state"
+    enabled: true
+    step_interval: 5  # 约100Hz (500Hz/5)
+    module: ".low_state_plugin"
+    class: "LowStatePlugin"
+
+  # 关节状态发布插件（用于可视化）
+  - name: "joint_state"
+    enabled: true
+    step_interval: 8  # 约62.5Hz (500Hz/8)，由定时器调用，step_interval不影响
+    module: ".joint_state_plugin"
+    class: "JointStatePlugin"
+
+  # 地形可视化插件
+  - name: "terrain"
+    enabled: true
+    step_interval: 8  # 约62.5Hz (500Hz/8)
+    module: ".terrain_plugin"
+    class: "TerrainPlugin"
+
+  # 里程计插件
+  - name: "odom"
+    enabled: true
+    step_interval: 5  # 约100Hz (500Hz/5)
+    module: ".odom_plugin"
+    class: "OdomPlugin"
+
+  # 高程图插件
+  - name: "elevation_map"
+    enabled: true
+    step_interval: 8  # 约62.5Hz (500Hz/8)
+    module: ".elevation_map_plugin"
+    class: "ElevationMapPlugin"
+
+  # 激光雷达插件
+  - name: "lidar"
+    enabled: true
+    step_interval: 50  # 约10Hz (500Hz/50)
+    module: ".lidar_plugin"
+    class: "LidarPlugin"
+
+  # 日志输出插件
+  - name: "log"
+    enabled: true
+    step_interval: 50  # 约10Hz (500Hz/50)
+    module: ".log_plugin"
+    class: "LogPlugin"
+
+  # Map坐标系插件
+  - name: "map_frame"
+    enabled: true
+    step_interval: 1  # 由回调触发，step_interval不影响
+    module: ".map_frame_plugin"
+    class: "MapFramePlugin"
