@@ -8,6 +8,7 @@ from .terrain import Terrain
 from .joint_state import JointStates
 from .map_frame import MapFrame
 from .imu import Imu
+from .horizontal_radar import HorizontalRadar
 
 __all__ = [
     'BasePlugin',
@@ -19,5 +20,6 @@ __all__ = [
     'Terrain',
     'JointStates',
     'MapFrame',
-    'Imu'
+    'Imu',
+    'HorizontalRadar'
 ]

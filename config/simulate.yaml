@@ -31,39 +31,49 @@ mujoco_simulator:
         noise_joint_vel: 0.0
 
       # 高程图
-      - path: "elevation_map:ElevationMap"
-        step_interval: 8
-        topic: "/elevation/map_array"
-        attach_link_name: "lidar_site"
-        size: [1.35, 0.95]
-        resolution: 0.05
-        noise_elevation_map: 0.0
+      # - path: "elevation_map:ElevationMap"
+      #   step_interval: 8
+      #   topic: "/elevation/map_array"
+      #   attach_link_name: "lidar_site"
+      #   size: [1.35, 0.95]
+      #   resolution: 0.05
+      #   noise_elevation_map: 0.0
 
       # 关节状态发布（用于可视化）
-      - path: "joint_state:JointStates"
-        step_interval: 8
+      # - path: "joint_state:JointStates"
+      #   step_interval: 8
 
       # 地形可视化
-      - path: "terrain:Terrain"
-        step_interval: 8
+      # - path: "terrain:Terrain"
+      #   step_interval: 8
 
       # 里程计
-      - path: "odom:Odom"
-        step_interval: 5
-        odomTopic: "/robot_odom"
+      # - path: "odom:Odom"
+      #   step_interval: 5
+      #   odomTopic: "/robot_odom"
 
       # IMU数据发布（用于感知）
-      - path: "imu:Imu"
-        step_interval: 50
-        imuTopic: "/imu"
-        g_unit: "g"
+      # - path: "imu:Imu"
+      #   step_interval: 50
+      #   imuTopic: "/imu"
+      #   g_unit: "g"
 
       # 激光雷达
-      - path: "lidar:Lidar"
-        step_interval: 50
-        pointCloudTopic: "/point_cloud"
-        pointCloudType: "PointCloud2"
+      # - path: "lidar:Lidar"
+      #   step_interval: 50
+      #   pointCloudTopic: "/point_cloud"
+      #   pointCloudType: "PointCloud2"
+
+      # 水平雷达（障碍物感知）
+      - path: "horizontal_radar:HorizontalRadar"
+        step_interval: 10
+        site_name: "lidar_site"
+        num_rays: 64
+        num_bins: 16
+        max_distance: 3.0
+        topic_name: "/horizontal_radar"
+        enable_visualization: true
 
       # Map坐标系
-      - path: "map_frame:MapFrame"
-        step_interval: 1
+      # - path: "map_frame:MapFrame"
+      #   step_interval: 1

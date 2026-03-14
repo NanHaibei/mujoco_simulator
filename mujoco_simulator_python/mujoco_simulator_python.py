@@ -177,7 +177,6 @@ class mujoco_simulator(Node):
                 
                 # 间隔一定step次数进行一次画面渲染
                 if self.step_counter % self.render_decimation == 0:
-                    viewer.sync()
                     
                     # 调用所有插件的可视化方法
                     for plugin in self.plugins:
@@ -185,6 +184,8 @@ class mujoco_simulator(Node):
                             plugin.visualize(viewer)
                         except Exception as e:
                             self.get_logger().error(f"插件 {plugin.name} 可视化失败: {e}")
+
+                    viewer.sync()
 
                 # 处理ROS回调（非阻塞）
                 rclpy.spin_once(self, timeout_sec=0.0)
