@@ -14,13 +14,18 @@ mujoco_simulator:
     # path格式: "module:class"，例如 "low_command:LowCommand"
     # step_interval: 每隔多少仿真步执行一次（仿真频率通常为500Hz）
     plugins:
-      # 命令 - 负责初始化 low_cmd_msg，接收控制命令并计算关节力矩
+      # 模型信息 - 必须是第一个插件，不能注释
+      - path: "model_info:ModelInfo"
+        step_interval: 1
+        show_table: true  # 是否显示模型信息表格
+
+      # 接收命令
       - path: "low_command:LowCommand"
         step_interval: 1 # 由回调函数决定，设置多少都行
         jointCommandsTopic: "/low_command"
         cmdDelay: 0
 
-      # 低状态发布（电机与IMU状态）- 初始化 low_state_msg
+      # 发布状态
       - path: "low_state:LowState"
         step_interval: 5 
         lowStateTopic: "/low_state"

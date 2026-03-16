@@ -226,15 +226,9 @@ class HorizontalRadar(BasePlugin):
             return
         
         if not hasattr(self, 'enabled') or not self.enabled:
-            self.simulator.get_logger().info(
-                "2"
-            )
             return
         
         if self.current_site_pos is None:
-            self.simulator.get_logger().info(
-                "3"
-            )
             return
         
         # 保留场景中已有的几何体（如机器人模型等）

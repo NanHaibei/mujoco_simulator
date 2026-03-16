@@ -1,4 +1,5 @@
 from .base import BasePlugin
+from .model_info import ModelInfo
 from .elevation_map import ElevationMap
 from .lidar import Lidar
 from .odom import Odom
@@ -12,6 +13,7 @@ from .horizontal_radar import HorizontalRadar
 
 __all__ = [
     'BasePlugin',
+    'ModelInfo',
     'ElevationMap',
     'Lidar', 
     'Odom',
