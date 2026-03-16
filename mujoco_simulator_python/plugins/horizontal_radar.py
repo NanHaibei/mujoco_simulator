@@ -42,6 +42,10 @@ class HorizontalRadar(BasePlugin):
         self.topic_name = plugin_config.get("topic_name", "/horizontal_radar")
         self.enable_visualization = plugin_config.get("enable_visualization", True)
         
+        # offset 参数：在 site 本地坐标系下的位置偏移 [x, y, z]
+        offset_config = plugin_config.get("offset", [0.0, 0.0, 0.0])
+        self.offset = np.array(offset_config, dtype=np.float64)
+        
         # 计算 bin 相关参数
         self.bin_size = 2 * np.pi / self.num_bins  # 每个 bin 的角度范围 (22.5°)
         
@@ -88,7 +92,7 @@ class HorizontalRadar(BasePlugin):
         self.simulator.get_logger().info(
             f"水平雷达插件已初始化: site={self.site_name}, "
             f"rays={self.num_rays}, bins={self.num_bins}, "
-            f"max_dist={self.max_distance}"
+            f"max_dist={self.max_distance}, offset={self.offset.tolist()}"
         )
     
     def _encode_distance(self, dist: float) -> float:
@@ -144,15 +148,25 @@ class HorizontalRadar(BasePlugin):
         if not hasattr(self, 'enabled') or not self.enabled:
             return
         
-        # 获取site的世界坐标位置
+        # 获取site的世界坐标位置和旋转矩阵
         site_pos = self.mj_data.site_xpos[self.site_id].copy()
-        self.current_site_pos = site_pos  # 保存用于可视化
+        site_mat = self.mj_data.site_xmat[self.site_id].reshape(3, 3).copy()
+        
+        # 将 offset 从 site 本地坐标系转换到世界坐标系
+        if np.any(self.offset != 0):
+            # 使用旋转矩阵将本地坐标转换到世界坐标
+            offset_world = site_mat @ self.offset
+            ray_origin = site_pos + offset_world
+        else:
+            ray_origin = site_pos
+        
+        self.current_site_pos = ray_origin  # 保存用于可视化
         
         # 存储距离结果
         dists = np.full(self.num_rays, self.max_distance, dtype=np.float64)
         
         # 使用射线追踪计算距离
-        self._compute_distances(site_pos, dists)
+        self._compute_distances(ray_origin, dists)
         
         # 保存距离结果用于可视化
         self.distances = dists.copy()

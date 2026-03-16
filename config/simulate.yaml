@@ -73,6 +73,7 @@ mujoco_simulator:
       - path: "horizontal_radar:HorizontalRadar"
         step_interval: 10
         site_name: "lidar_site"
+        offset: [0.0, 0.0, 0.5]  # 在site坐标系下的位置偏移 [x, y, z]
         num_rays: 64
         num_bins: 16
         max_distance: 3.0
