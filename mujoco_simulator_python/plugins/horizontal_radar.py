@@ -1,6 +1,7 @@
 from __future__ import annotations
 import mujoco
 import numpy as np
+import colorsys
 from std_msgs.msg import Float32MultiArray
 from typing import TYPE_CHECKING
 
@@ -162,6 +163,18 @@ class HorizontalRadar(BasePlugin):
         
         self.current_site_pos = ray_origin  # 保存用于可视化
         
+        # 计算机器人的 yaw 角（从旋转矩阵提取）
+        # site_mat 是 3x3 旋转矩阵，yaw = atan2(mat[1,0], mat[0,0])
+        yaw = np.arctan2(site_mat[1, 0], site_mat[0, 0])
+        
+        # 根据机器人的 yaw 角更新射线方向
+        for i, base_angle in enumerate(self.ray_angles):
+            # 将基础角度加上机器人的 yaw 角
+            world_angle = base_angle + yaw
+            self.ray_directions[i, 0] = np.cos(world_angle)  # x
+            self.ray_directions[i, 1] = np.sin(world_angle)  # y
+            self.ray_directions[i, 2] = 0.0                   # z (水平)
+        
         # 存储距离结果
         dists = np.full(self.num_rays, self.max_distance, dtype=np.float64)
         
@@ -186,19 +199,50 @@ class HorizontalRadar(BasePlugin):
             # 如果传感器值大于 0，应用插值
             if sensor > 0:
                 self._apply_alias_interpolation(self.ray_angles[i], sensor, self.lidar_output)
-                
-                # 记录每个 bin 中最近障碍物的射线
-                angle = self.ray_angles[i] % (2 * np.pi)
-                bin_idx = int(angle / self.bin_size)
-                if dists[i] < min_dist_per_bin[bin_idx]:
-                    min_dist_per_bin[bin_idx] = dists[i]
-                    self.closest_ray_per_bin[bin_idx] = i
+            
+            # 记录每个 bin 中最近障碍物的射线（使用整数运算与 visualize 保持一致）
+            bin_idx = (i * self.num_bins) // self.num_rays
+            if dists[i] < min_dist_per_bin[bin_idx]:
+                min_dist_per_bin[bin_idx] = dists[i]
+                self.closest_ray_per_bin[bin_idx] = i
         
         # 发布结果
         msg = Float32MultiArray()
         msg.data = self.lidar_output.tolist()
         self.radar_pub.publish(msg)
     
+    def _get_bin_color(self, bin_idx: int, is_closest: bool = False) -> list:
+        """根据 bin 索引获取颜色
+        
+        使用黄金角度分布的色相，使相邻 bin 颜色差异最大化：
+        - 黄金角度 ≈ 0.618（色相环上的最优分布）
+        - 相邻 bin 在色轮上相距约 222°，视觉差异明显
+        
+        Args:
+            bin_idx: bin 索引 [0, num_bins-1]
+            is_closest: 是否是该 bin 中最近障碍物的射线
+            
+        Returns:
+            RGBA 颜色列表 [r, g, b, a]
+        """
+        # 最近障碍物的射线使用白色
+        if is_closest:
+            return [1.0, 1.0, 1.0, 1.0]  # 白色
+        
+        # 使用黄金角度分布色相，使相邻 bin 颜色差异最大化
+        # 黄金比例 ≈ 0.618033988749895
+        golden_ratio = 0.618033988749895
+        hue = (bin_idx * golden_ratio) % 1.0
+        
+        # 饱和度和明度
+        saturation = 0.8
+        value = 0.9
+        
+        # HSV 转 RGB
+        r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
+        
+        return [r, g, b, 1.0]
+
     def _compute_distances(self, pnt: np.ndarray, dists: np.ndarray):
         """计算射线距离
         
@@ -229,9 +273,15 @@ class HorizontalRadar(BasePlugin):
     def visualize(self, viewer):
         """可视化射线
         
-        绘制 64 根射线：
-        - 红色：在每个 bin 内探测到最近障碍物的射线
-        - 黄色：其他射线
+        绘制 64 根射线，不同 bin 使用不同颜色（HSV 色轮）：
+        - 每个 bin 的射线使用不同的色相
+        - 最近障碍物的射线更亮，其他射线稍暗
+        
+        颜色布局：
+        - bin[0]（正前方）= 红色
+        - bin[4]（正左方）= 绿色
+        - bin[8]（正后方）= 青色
+        - bin[12]（正右方）= 蓝色
         
         Args:
             viewer: mujoco viewer 实例
@@ -248,20 +298,19 @@ class HorizontalRadar(BasePlugin):
         # 保留场景中已有的几何体（如机器人模型等）
         viewer.user_scn.ngeom = self.mj_model.ngeom
         
-        # 获取 closest_ray_per_bin 的集合（需要高亮为红色的射线）
+        # 获取 closest_ray_per_bin 的集合
         closest_rays = set(self.closest_ray_per_bin[self.closest_ray_per_bin >= 0])
-        
-        # 定义颜色 (RGBA)
-        RED = [1.0, 0.2, 0.2, 1.0]      # 红色 - 最近障碍物
-        YELLOW = [1.0, 1.0, 0.2, 1.0]   # 黄色 - 其他射线
         
         # 绘制每条射线
         for i in range(self.num_rays):
-            # 确定颜色
-            if i in closest_rays:
-                color = RED
-            else:
-                color = YELLOW
+            # 计算射线所属的 bin（使用整数运算避免浮点精度问题）
+            bin_idx = (i * self.num_bins) // self.num_rays
+            
+            # 判断是否是该 bin 中最近障碍物的射线
+            is_closest = i in closest_rays
+            
+            # 获取颜色
+            color = self._get_bin_color(bin_idx, is_closest)
             
             # 计算射线起点和终点
             start = self.current_site_pos
@@ -282,11 +331,10 @@ class HorizontalRadar(BasePlugin):
             )
             
             # 使用 mjv_connector 设置线条连接
-            # mjv_connector(geom, type, width, from_, to)
             mujoco.mjv_connector(
                 viewer.user_scn.geoms[viewer.user_scn.ngeom - 1],
                 mujoco.mjtGeom.mjGEOM_LINE,
-                0.01,  # width: 线条宽度
+                3.03,  # width: 线条宽度
                 start.astype(np.float64),  # from_: 起点 [3]
                 end.astype(np.float64)     # to: 终点 [3]
             )

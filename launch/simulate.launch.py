@@ -3,6 +3,105 @@ from launch_ros.actions import Node
 from ament_index_python import get_package_share_directory
 import os
 from datetime import datetime
+import re
+import glob
+
+def extract_urdf_binding(mjcf_path):
+    """从MJCF文件的注释中提取URDF绑定信息
+    
+    查找格式: <!-- urdf_bind: filename.urdf -->
+    
+    Args:
+        mjcf_path: MJCF文件的完整路径
+        
+    Returns:
+        str: 绑定的URDF文件名，如果未找到则返回None
+    """
+    with open(mjcf_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    # 查找 <!-- urdf_bind: filename.urdf --> 格式的注释
+    match = re.search(r'<!--\s*urdf_bind:\s*(.+?\.urdf)\s*-->', content)
+    if match:
+        return match.group(1).strip()
+    return None
+
+def extract_included_files(mjcf_path):
+    """从MJCF文件中提取所有include的文件路径
+    
+    查找格式: <include file="filename.xml"/>
+    
+    Args:
+        mjcf_path: MJCF文件的完整路径
+        
+    Returns:
+        list: include的文件名列表
+    """
+    with open(mjcf_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    # 查找所有 <include file="xxx.xml"/> 或 <include file="xxx.xml" /> 格式
+    matches = re.findall(r'<include\s+file="([^"]+)"\s*/?>', content)
+    return matches
+
+def find_urdf_binding_recursive(mjcf_path, robot_pkg_path, visited=None):
+    """递归地从MJCF文件及其include的文件中查找URDF绑定
+    
+    Args:
+        mjcf_path: MJCF文件的完整路径
+        robot_pkg_path: robot_description包的路径
+        visited: 已访问的文件集合（防止循环引用）
+        
+    Returns:
+        str: 绑定的URDF文件名，如果未找到则返回None
+    """
+    if visited is None:
+        visited = set()
+    
+    # 规范化路径以避免重复访问
+    mjcf_path = os.path.normpath(mjcf_path)
+    if mjcf_path in visited:
+        return None
+    visited.add(mjcf_path)
+    
+    # 首先检查当前文件是否有urdf_bind注释
+    urdf_binding = extract_urdf_binding(mjcf_path)
+    if urdf_binding:
+        return urdf_binding
+    
+    # 如果没有，查找include的文件
+    included_files = extract_included_files(mjcf_path)
+    mjcf_dir = os.path.dirname(mjcf_path)
+    
+    for included_file in included_files:
+        # 构建include文件的完整路径
+        included_path = os.path.join(mjcf_dir, included_file)
+        
+        if os.path.exists(included_path):
+            # 递归查找
+            urdf_binding = find_urdf_binding_recursive(included_path, robot_pkg_path, visited)
+            if urdf_binding:
+                return urdf_binding
+    
+    return None
+
+def find_urdf_by_binding(robot_pkg_path, urdf_filename):
+    """根据绑定的URDF文件名查找完整路径
+    
+    Args:
+        robot_pkg_path: robot_description包的路径
+        urdf_filename: 绑定的URDF文件名
+        
+    Returns:
+        str: URDF文件的完整路径，如果未找到则返回None
+    """
+    # 在所有子目录中搜索指定的URDF文件
+    search_pattern = os.path.join(robot_pkg_path, "**", urdf_filename)
+    matches = glob.glob(search_pattern, recursive=True)
+    
+    if matches:
+        return matches[0]
+    return None
 
 def find_matching_file(base_path, pattern, file_extension):
     """在robot_description目录中搜索匹配的文件"""
@@ -32,9 +131,10 @@ def find_matching_file(base_path, pattern, file_extension):
     return None
 
 def scan_available_models(robot_pkg_path):
-    """扫描robot_description目录，自动发现可用的机器人模型"""
-    import glob
+    """扫描robot_description目录，自动发现可用的机器人模型
     
+    只返回包含有效URDF绑定的MJCF场景文件（包括递归查找include的文件）
+    """
     available_models = []
     
     # 搜索所有 scene_*.xml 文件
@@ -47,14 +147,14 @@ def scan_available_models(robot_pkg_path):
         if basename.startswith("scene_") and basename.endswith(".xml"):
             model_name = basename[6:-4]  # 去掉 "scene_" 前缀和 ".xml" 后缀
             
-            # 检查是否存在对应的 urdf 文件（清理后的名称）
-            clean_model_name = model_name.replace("_float", "").replace("_bind", "")
-            urdf_pattern = os.path.join(robot_pkg_path, "**", "urdf", f"*{clean_model_name}*.urdf")
-            urdf_files = glob.glob(urdf_pattern, recursive=True)
+            # 递归检查MJCF文件及其include的文件中是否有URDF绑定注释
+            urdf_binding = find_urdf_binding_recursive(mjcf_file, robot_pkg_path)
             
-            # 只有同时存在 mjcf 和 urdf 文件的模型才添加到列表
-            if urdf_files:
-                available_models.append(model_name)
+            if urdf_binding:
+                # 验证绑定的URDF文件是否存在
+                urdf_path = find_urdf_by_binding(robot_pkg_path, urdf_binding)
+                if urdf_path:
+                    available_models.append(model_name)
     
     # 排序以便更好地显示
     available_models.sort()
@@ -139,12 +239,23 @@ def generate_launch_description():
     
     print(f"  📁 找到MJCF文件: {mjcf_path}")
     
-    # 搜索urdf文件（需要清理model_name中的特殊字段）
-    clean_model_name = model_name.replace("_float", "").replace("scene_", "").replace("_bind", "")
-    urdf_path = find_matching_file(robot_pkg_path, clean_model_name, "urdf")
+    # 递归从MJCF文件及其include的文件中提取URDF绑定信息
+    urdf_binding = find_urdf_binding_recursive(mjcf_path, robot_pkg_path)
+    
+    if urdf_binding is None:
+        print(f"\n❌ 错误：MJCF文件及其include的文件中未找到URDF绑定信息！")
+        print(f"   文件: {mjcf_path}")
+        print(f"   请在MJCF文件或其include的文件中添加绑定注释，格式如下：")
+        print(f"   <!-- urdf_bind: your_robot.urdf -->")
+        raise RuntimeError(f"未找到URDF绑定信息，请在MJCF文件或其include的文件中添加 '<!-- urdf_bind: xxx.urdf -->' 注释")
+    
+    print(f"  📎 URDF绑定: {urdf_binding}")
+    
+    # 根据绑定信息查找URDF文件
+    urdf_path = find_urdf_by_binding(robot_pkg_path, urdf_binding)
     
     if urdf_path is None:
-        raise FileNotFoundError(f"未找到匹配的URDF文件: {clean_model_name}.urdf 在 {robot_pkg_path}")
+        raise FileNotFoundError(f"未找到绑定的URDF文件: {urdf_binding} 在 {robot_pkg_path}")
     
     print(f"  📁 找到URDF文件: {urdf_path}")
     print(f"{'='*60}\n") 

@@ -126,6 +126,9 @@ class mujoco_simulator(Node):
         
         # 开启mujoco窗口
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
+            # 默认关闭0号组的可视化（通常是地面平面）
+            viewer.opt.geomgroup[0] = 0
+            
             while viewer.is_running():
                 # 开始计时
                 self.step_stats.tic()
