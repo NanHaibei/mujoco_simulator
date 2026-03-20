@@ -69,16 +69,18 @@ mujoco_simulator:
       #   pointCloudTopic: "/point_cloud"
       #   pointCloudType: "PointCloud2"
 
-      # 水平雷达（障碍物感知）
-      - path: "horizontal_radar:HorizontalRadar"
-        step_interval: 10
-        site_name: "lidar_site"
-        offset: [0.0, 0.0, 0.5]  # 在site坐标系下的位置偏移 [x, y, z]
-        num_rays: 64
-        num_bins: 16
-        max_distance: 3.0
-        topic_name: "/horizontal_radar"
-        enable_visualization: true
+      # 水平雷达（障碍物感知 + 目标点感知）
+      # - path: "horizontal_radar:HorizontalRadar"
+      #   step_interval: 10
+      #   site_name: "lidar_site"
+      #   offset: [0.0, 0.0, 0.5]  # 在site坐标系下的位置偏移 [x, y, z]
+      #   num_rays: 64
+      #   num_bins: 16
+      #   max_distance: 3.0           # hazards_lidar 最大探测距离
+      #   goal_max_distance: 15.0     # goal_lidar 最大探测距离
+      #   goal_position: [10.0, 0.0]   # 目标点世界坐标 [x, y]
+      #   topic_name: "/horizontal_radar"
+      #   enable_visualization: true
 
       # Map坐标系
       # - path: "map_frame:MapFrame"

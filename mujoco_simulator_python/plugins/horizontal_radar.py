@@ -29,6 +29,10 @@ class HorizontalRadar(BasePlugin):
     - bin[4] = 正左方  
     - bin[8] = 正后方
     - bin[12] = 正右方
+    
+    输出数据（32维）：
+    - [0:16]  = goal_lidar（目标点感知）
+    - [16:32] = hazards_lidar（障碍物感知）
     """
     
     def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
@@ -46,6 +50,16 @@ class HorizontalRadar(BasePlugin):
         # offset 参数：在 site 本地坐标系下的位置偏移 [x, y, z]
         offset_config = plugin_config.get("offset", [0.0, 0.0, 0.0])
         self.offset = np.array(offset_config, dtype=np.float64)
+        
+        # goal_lidar 配置参数
+        self.goal_max_distance = plugin_config.get("goal_max_distance", 15.0)  # 默认 15.0m
+        goal_position_config = plugin_config.get("goal_position", None)  # 默认 None 表示不启用
+        if goal_position_config is not None:
+            self.goal_position = np.array(goal_position_config, dtype=np.float64)  # [x, y]
+            self.goal_enabled = True
+        else:
+            self.goal_position = None
+            self.goal_enabled = False
         
         # 计算 bin 相关参数
         self.bin_size = 2 * np.pi / self.num_bins  # 每个 bin 的角度范围 (22.5°)
@@ -82,22 +96,30 @@ class HorizontalRadar(BasePlugin):
             Float32MultiArray, self.topic_name, 10
         )
         
-        # 存储结果
+        # 存储结果 - hazards_lidar
         self.distances = np.full(self.num_rays, self.max_distance, dtype=np.float64)
         self.lidar_output = np.zeros(self.num_bins, dtype=np.float32)
+        
+        # 存储结果 - goal_lidar
+        self.goal_lidar_output = np.zeros(self.num_bins, dtype=np.float32)
+        self.goal_distance = self.goal_max_distance  # 当前帧目标点距离
+        self.goal_angle = 0.0  # 当前帧目标点相对角度（机器人本体坐标系）
         
         # 可视化相关
         self.closest_ray_per_bin = np.zeros(self.num_bins, dtype=np.int32)  # 每个 bin 中最近障碍物的射线索引
         self.current_site_pos = None  # 当前帧的 site 位置
         
+        # 日志信息
+        goal_info = f", goal_pos={self.goal_position.tolist()}, goal_max_dist={self.goal_max_distance}" if self.goal_enabled else ", goal_lidar=disabled"
         self.simulator.get_logger().info(
             f"水平雷达插件已初始化: site={self.site_name}, "
             f"rays={self.num_rays}, bins={self.num_bins}, "
             f"max_dist={self.max_distance}, offset={self.offset.tolist()}"
+            f"{goal_info}"
         )
     
     def _encode_distance(self, dist: float) -> float:
-        """距离编码函数
+        """距离编码函数（hazards_lidar 使用）
         
         编码公式: sensor = max(0, (max_dist - dist) / max_dist)
         - 距离越近值越大
@@ -110,6 +132,61 @@ class HorizontalRadar(BasePlugin):
             编码后的值 [0, 1]
         """
         return max(0.0, (self.max_distance - dist) / self.max_distance)
+    
+    def _encode_goal_distance(self, dist: float) -> float:
+        """距离编码函数（goal_lidar 使用）
+        
+        编码公式: sensor = max(0, (max_dist - dist) / max_dist)
+        - 距离越近值越大
+        - 超出最大感知范围值为 0
+        
+        Args:
+            dist: 实际距离
+            
+        Returns:
+            编码后的值 [0, 1]
+        """
+        return max(0.0, (self.goal_max_distance - dist) / self.goal_max_distance)
+    
+    def _compute_goal_lidar(self, robot_pos: np.ndarray, robot_yaw: float):
+        """计算 goal_lidar 输出
+        
+        计算目标点相对于机器人的位置，并进行距离编码和 Alias 插值。
+        
+        Args:
+            robot_pos: 机器人当前位置 [x, y, z]
+            robot_yaw: 机器人当前 yaw 角（弧度）
+        """
+        # 初始化 goal_lidar 输出为 0
+        self.goal_lidar_output.fill(0.0)
+        
+        if not self.goal_enabled:
+            self.goal_distance = self.goal_max_distance
+            self.goal_angle = 0.0
+            return
+        
+        # 计算目标点相对于机器人的方向向量（世界坐标系）
+        dx = self.goal_position[0] - robot_pos[0]
+        dy = self.goal_position[1] - robot_pos[1]
+        
+        # 计算水平距离
+        self.goal_distance = np.sqrt(dx**2 + dy**2)
+        
+        # 计算目标点在世界坐标系中的角度
+        world_angle = np.arctan2(dy, dx)
+        
+        # 转换到机器人本体坐标系的角度
+        self.goal_angle = world_angle - robot_yaw
+        
+        # 将角度归一化到 [0, 2π) 范围
+        self.goal_angle = self.goal_angle % (2 * np.pi)
+        
+        # 距离编码
+        sensor = self._encode_goal_distance(self.goal_distance)
+        
+        # 如果传感器值大于 0，应用 Alias 插值
+        if sensor > 0:
+            self._apply_alias_interpolation(self.goal_angle, sensor, self.goal_lidar_output)
     
     def _apply_alias_interpolation(self, angle: float, sensor: float, obs: np.ndarray):
         """应用 Alias 插值算法
@@ -206,9 +283,15 @@ class HorizontalRadar(BasePlugin):
                 min_dist_per_bin[bin_idx] = dists[i]
                 self.closest_ray_per_bin[bin_idx] = i
         
-        # 发布结果
+        # 计算 goal_lidar
+        self._compute_goal_lidar(ray_origin, yaw)
+        
+        # 合并输出：前16维是goal，后16维是hazards
+        final_output = np.concatenate([self.goal_lidar_output, self.lidar_output])
+        
+        # 发布结果（32维）
         msg = Float32MultiArray()
-        msg.data = self.lidar_output.tolist()
+        msg.data = final_output.tolist()
         self.radar_pub.publish(msg)
     
     def _get_bin_color(self, bin_idx: int, is_closest: bool = False) -> list:
@@ -283,6 +366,8 @@ class HorizontalRadar(BasePlugin):
         - bin[8]（正后方）= 青色
         - bin[12]（正右方）= 蓝色
         
+        此外，绘制一条指向目标点的绿色射线（goal_lidar）。
+        
         Args:
             viewer: mujoco viewer 实例
         """
@@ -301,7 +386,7 @@ class HorizontalRadar(BasePlugin):
         # 获取 closest_ray_per_bin 的集合
         closest_rays = set(self.closest_ray_per_bin[self.closest_ray_per_bin >= 0])
         
-        # 绘制每条射线
+        # 绘制每条 hazards_lidar 射线
         for i in range(self.num_rays):
             # 计算射线所属的 bin（使用整数运算避免浮点精度问题）
             bin_idx = (i * self.num_bins) // self.num_rays
@@ -337,4 +422,42 @@ class HorizontalRadar(BasePlugin):
                 3.03,  # width: 线条宽度
                 start.astype(np.float64),  # from_: 起点 [3]
                 end.astype(np.float64)     # to: 终点 [3]
+            )
+        
+        # 绘制 goal_lidar 射线（指向目标点的绿色射线）
+        if self.goal_enabled:
+            # 计算目标点在世界坐标系中的位置
+            goal_world = np.array([
+                self.goal_position[0],
+                self.goal_position[1],
+                self.current_site_pos[2]  # 使用机器人当前位置的高度
+            ])
+            
+            # 绿色射线颜色
+            goal_color = [0.0, 1.0, 0.0, 1.0]  # RGBA: 绿色
+            
+            # 射线起点和终点
+            start = self.current_site_pos
+            end = goal_world
+            
+            # 增加几何体计数
+            viewer.user_scn.ngeom += 1
+            
+            # 初始化线条几何体
+            mujoco.mjv_initGeom(
+                viewer.user_scn.geoms[viewer.user_scn.ngeom - 1],
+                type=mujoco.mjtGeom.mjGEOM_LINE,
+                size=[0.01, 0, 0],  # 线条粗细（比 hazards_lidar 更粗）
+                pos=start,
+                mat=np.eye(3).flatten(),
+                rgba=np.array(goal_color, dtype=np.float32)
+            )
+            
+            # 使用 mjv_connector 设置线条连接
+            mujoco.mjv_connector(
+                viewer.user_scn.geoms[viewer.user_scn.ngeom - 1],
+                mujoco.mjtGeom.mjGEOM_LINE,
+                5.0,  # width: 线条宽度（比 hazards_lidar 更宽）
+                start.astype(np.float64),
+                end.astype(np.float64)
             )
