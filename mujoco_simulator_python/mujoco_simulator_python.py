@@ -3,8 +3,10 @@ import mujoco
 import time
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import SingleThreadedExecutor
 from mit_msgs.msg import MITLowState, MITJointCommand, MITJointCommands
 import yaml
+import threading
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -121,8 +123,53 @@ class mujoco_simulator(Node):
         self.plugins = []
         self._load_plugins()
 
+        # ==================== ROS 回调线程 ====================
+        self._executor = SingleThreadedExecutor()
+        self._executor.add_node(self)
+        self._spin_thread = None
+        self._spin_running = threading.Event()
+
+    def _spin_executor(self):
+        """后台线程持续处理 ROS 回调。"""
+        while self._spin_running.is_set() and rclpy.ok():
+            self._executor.spin_once(timeout_sec=0.1)
+
+    def _start_ros_spin_thread(self):
+        """启动独立 ROS 回调线程。"""
+        if self._spin_thread is not None and self._spin_thread.is_alive():
+            return
+
+        self._spin_running.set()
+        self._spin_thread = threading.Thread(
+            target=self._spin_executor,
+            name='mujoco_simulator_ros_spin',
+            daemon=True,
+        )
+        self._spin_thread.start()
+
+    def _stop_ros_spin_thread(self):
+        """停止独立 ROS 回调线程并清理执行器。"""
+        self._spin_running.clear()
+
+        if self._executor is not None:
+            self._executor.wake()
+
+        if self._spin_thread is not None and self._spin_thread.is_alive():
+            self._spin_thread.join(timeout=1.0)
+
+        if self._executor is not None:
+            try:
+                self._executor.remove_node(self)
+            except Exception:
+                pass
+            self._executor.shutdown()
+            self._executor = None
+
+        self._spin_thread = None
+
     def run(self):
         """物理仿真主循环, 默认500Hz"""
+        self._start_ros_spin_thread()
         
         # 开启mujoco窗口
         with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
@@ -148,10 +195,6 @@ class mujoco_simulator(Node):
                             self.get_logger().error(f"插件 {plugin.name} 可视化失败: {e}")
 
                     viewer.sync()
-
-                # 处理ROS回调（非阻塞）
-                rclpy.spin_once(self, timeout_sec=0.0)
-
                 # ==================== 调用所有插件的update方法 ====================
                 for plugin in self.plugins:
                     try:
@@ -237,7 +280,12 @@ class mujoco_simulator(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = mujoco_simulator()
-    node.run()
+    try:
+        node.run()
+    finally:
+        node._stop_ros_spin_thread()
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':

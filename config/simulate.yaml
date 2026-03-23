@@ -45,17 +45,17 @@ mujoco_simulator:
       #   noise_elevation_map: 0.0
 
       # 关节状态发布（rviz/foxglove可视化，建议开启）
-      - path: "joint_state:JointStates"
-        step_interval: 8
+      # - path: "joint_state:JointStates"
+      #   step_interval: 8
 
       # 地形可视化
-      - path: "terrain:Terrain"
-        step_interval: 8
+      # - path: "terrain:Terrain"
+      #   step_interval: 8
 
       # 里程计（rviz/foxglove可视化，建议开启）
-      - path: "odom:Odom"
-        step_interval: 5
-        odomTopic: "/robot_odom"
+      # - path: "odom:Odom"
+      #   step_interval: 5
+      #   odomTopic: "/robot_odom"
 
       # IMU数据发布（用于感知）
       # - path: "imu:Imu"
