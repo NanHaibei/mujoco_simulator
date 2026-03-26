@@ -9,7 +9,9 @@ from .terrain import Terrain
 from .joint_state import JointStates
 from .map_frame import MapFrame
 from .imu import Imu
+from .imu2 import Imu2
 from .horizontal_radar import HorizontalRadar
+from .dlio_radar_visualizer import DlioRadarVisualizer
 
 __all__ = [
     'BasePlugin',
@@ -23,5 +25,7 @@ __all__ = [
     'JointStates',
     'MapFrame',
     'Imu',
-    'HorizontalRadar'
+    'Imu2',
+    'HorizontalRadar',
+    'DlioRadarVisualizer'
 ]
