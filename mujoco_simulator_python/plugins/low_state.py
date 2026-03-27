@@ -2,6 +2,7 @@ from __future__ import annotations
 import copy
 import numpy as np
 from collections import deque
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from mit_msgs.msg import MITLowState
 from typing import TYPE_CHECKING
 
@@ -38,9 +39,15 @@ class LowState(BasePlugin):
         # 填充延迟队列
         for _ in range(self.state_delay):
             self.state_deque.append(copy.deepcopy(self.low_state_msg))
+
+        mit_qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+        )
         
         # 创建发布者
-        self.lowState_pub = self.simulator.create_publisher(MITLowState, self.low_state_topic, 10)
+        self.lowState_pub = self.simulator.create_publisher(MITLowState, self.low_state_topic, mit_qos)
     
     def execute(self):
         """执行低状态发布"""

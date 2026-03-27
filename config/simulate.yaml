@@ -22,13 +22,13 @@ mujoco_simulator:
       # 接收命令
       - path: "low_command:LowCommand"
         step_interval: 1 # 由回调函数决定，设置多少都行
-        jointCommandsTopic: "/low_command"
+        jointCommandsTopic: "/das_low_cmd"
         cmdDelay: 0
 
       # 发布状态
       - path: "low_state:LowState"
         step_interval: 5 
-        lowStateTopic: "/low_state"
+        lowStateTopic: "/das_low_state"
         stateDelay: 0
         noise_imu_angle_acc: 0.0
         noise_imu_gravity: 0.0

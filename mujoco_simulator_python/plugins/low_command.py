@@ -2,6 +2,7 @@ from __future__ import annotations
 import mujoco
 import numpy as np
 from collections import deque
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from mit_msgs.msg import MITJointCommands, MITJointCommand
 from typing import TYPE_CHECKING
 
@@ -26,7 +27,11 @@ class LowCommand(BasePlugin):
         
         # ==================== 初始化 low_cmd_msg ====================
         self.low_cmd_msg = MITJointCommands()
-        self.low_cmd_msg.commands = [MITJointCommand() for _ in range(self.mj_model.nu)]
+        self.low_cmd_msg.cmds.kp = [0.0 for _ in range(self.mj_model.nu)]
+        self.low_cmd_msg.cmds.kd = [0.0 for _ in range(self.mj_model.nu)]
+        self.low_cmd_msg.cmds.pos = [0.0 for _ in range(self.mj_model.nu)]
+        self.low_cmd_msg.cmds.vel = [0.0 for _ in range(self.mj_model.nu)]
+        self.low_cmd_msg.cmds.eff = [0.0 for _ in range(self.mj_model.nu)]
         
         # 初始化命令延迟队列
         self.cmd_deque = deque()
@@ -34,10 +39,16 @@ class LowCommand(BasePlugin):
         # 填充延迟队列
         for _ in range(self.cmd_delay):
             self.cmd_deque.append(self.low_cmd_msg)
+
+        mit_qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+        )
         
         # 订阅控制器命令
         self.joint_command_sub = self.simulator.create_subscription(
-            MITJointCommands, self.joint_commands_topic, self.low_cmd_callback, 10
+            MITJointCommands, self.joint_commands_topic, self.low_cmd_callback, mit_qos
         )
         
         # 注册mujoco控制回调
@@ -52,11 +63,11 @@ class LowCommand(BasePlugin):
         if self.low_cmd_msg is None:
             return
         
-        kp_cmd_list = np.array([cmd.kp for cmd in self.low_cmd_msg.commands])
-        kd_cmd_list = np.array([cmd.kd for cmd in self.low_cmd_msg.commands])
-        pos_cmd_list = np.array([cmd.pos for cmd in self.low_cmd_msg.commands])
-        vel_cmd_list = np.array([cmd.vel for cmd in self.low_cmd_msg.commands])
-        eff_cmd_list = np.array([cmd.eff for cmd in self.low_cmd_msg.commands])
+        kp_cmd_list = np.array(self.low_cmd_msg.cmds.kp)
+        kd_cmd_list = np.array(self.low_cmd_msg.cmds.kd)
+        pos_cmd_list = np.array(self.low_cmd_msg.cmds.pos)
+        vel_cmd_list = np.array(self.low_cmd_msg.cmds.vel)
+        eff_cmd_list = np.array(self.low_cmd_msg.cmds.eff)
         
         sensor_pos = np.array(self.simulator.sensor_data_list[
             self.simulator.joint_pos_head_id : self.simulator.joint_pos_head_id + self.mj_model.nu
@@ -72,9 +83,9 @@ class LowCommand(BasePlugin):
         """控制器命令回调函数"""
         if self.simulator.read_error_flag:
             return
-        if len(msg.commands) != self.mj_model.nu:
+        if len(msg.cmds.pos) != self.mj_model.nu:
             self.simulator.get_logger().error(
-                f"命令长度 {len(msg.commands)} 不等于模型关节数 {self.mj_model.nu}，请检查"
+                f"命令长度 {len(msg.cmds.pos)} 不等于模型关节数 {self.mj_model.nu}，请检查"
             )
             return
         
