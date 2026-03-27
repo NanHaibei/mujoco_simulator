@@ -57,17 +57,25 @@ mujoco_simulator:
       #   step_interval: 5
       #   odomTopic: "/robot_odom"
 
-      # IMU数据发布（用于感知）
+      # # IMU数据发布（用于plevis）
       # - path: "imu:Imu"
       #   step_interval: 50
       #   imuTopic: "/imu"
       #   g_unit: "g"
 
+      # 第二套IMU数据发布（torso上的 imu2，sensor_prefix是用于改不同传感器的，可复用）
+      - path: "imu2:Imu2"
+        step_interval: 2
+        imu2_topic: "/secondary_imu/converted"
+        frame_id: "imu2_frame"
+        sensor_prefix: "imu2"
+        g_unit: "g"
+
       # 激光雷达
-      # - path: "lidar:Lidar"
-      #   step_interval: 50
-      #   pointCloudTopic: "/point_cloud"
-      #   pointCloudType: "PointCloud2"
+      - path: "lidar:Lidar"
+        step_interval: 50
+        pointCloudTopic: "/point_cloud"
+        pointCloudType: "PointCloud2"
 
       # 水平雷达（障碍物感知 + 目标点感知）
       # - path: "horizontal_radar:HorizontalRadar"
@@ -85,3 +93,21 @@ mujoco_simulator:
       # Map坐标系
       # - path: "map_frame:MapFrame"
       #   step_interval: 1
+
+      # DLIO 水平雷达可视化（订阅 /horizontal_radar，在 Mujoco 中直观显示 goal/hazards）
+      - path: "dlio_radar_visualizer:DlioRadarVisualizer"
+        step_interval: 1
+        site_name: "lidar_site"
+        offset: [0.0, 0.0, 0.416]
+        topic_name: "/horizontal_radar"
+        num_bins: 16
+        max_distance: 3.0
+        goal_max_distance: 15.0
+        enable_visualization: true
+        show_goal: true
+        show_hazards: true
+        hazard_width: 3.0
+        goal_width: 6.0
+        hazard_alpha: 1.0
+        goal_alpha: 1.0
+        goal_single_line: true
