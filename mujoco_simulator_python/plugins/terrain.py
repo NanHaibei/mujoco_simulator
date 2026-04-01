@@ -1,4 +1,5 @@
 from __future__ import annotations
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from visualization_msgs.msg import Marker, MarkerArray
 from typing import TYPE_CHECKING
 
@@ -17,9 +18,14 @@ class Terrain(BasePlugin):
     def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
         """初始化地形可视化插件"""
         super().__init__(plugin_config, simulator)
+        qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
         # 创建发布者
         self.marker_array_pub = self.simulator.create_publisher(
-            MarkerArray, '/visualization_marker_array', 10
+            MarkerArray, '/visualization_marker_array', qos
         )
     
     def execute(self):

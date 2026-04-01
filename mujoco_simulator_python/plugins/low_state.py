@@ -43,7 +43,7 @@ class LowState(BasePlugin):
         mit_qos = QoSProfile(
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1,
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            reliability=QoSReliabilityPolicy.RELIABLE,
         )
         
         # 创建发布者

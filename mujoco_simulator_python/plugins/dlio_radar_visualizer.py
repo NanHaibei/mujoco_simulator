@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import mujoco
 import numpy as np
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Float32MultiArray
 from typing import TYPE_CHECKING
 
@@ -62,8 +63,14 @@ class DlioRadarVisualizer(BasePlugin):
         self.current_site_pos = None
         self.current_yaw = 0.0
 
+        qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
+
         self.radar_sub = self.simulator.create_subscription(
-            Float32MultiArray, self.topic_name, self.radar_callback, 10
+            Float32MultiArray, self.topic_name, self.radar_callback, qos
         )
 
         self.simulator.get_logger().info(

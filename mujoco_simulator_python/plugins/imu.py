@@ -1,6 +1,7 @@
 from __future__ import annotations
 from sensor_msgs.msg import Imu as ImuMsg
 from geometry_msgs.msg import TransformStamped
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -22,9 +23,15 @@ class Imu(BasePlugin):
         # 读取配置参数
         self.imu_topic = plugin_config.get("imuTopic", "/imu")
         self.g_unit = plugin_config.get("g_unit", "g")
+
+        qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
         
         # IMU发布者
-        self.imu_pub = self.simulator.create_publisher(ImuMsg, self.imu_topic, 10)
+        self.imu_pub = self.simulator.create_publisher(ImuMsg, self.imu_topic, qos)
         
         # 初始化IMU消息
         self.imu_msg = ImuMsg()

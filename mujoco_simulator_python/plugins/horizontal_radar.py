@@ -2,6 +2,7 @@ from __future__ import annotations
 import mujoco
 import numpy as np
 import colorsys
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Float32MultiArray
 from typing import TYPE_CHECKING
 
@@ -92,8 +93,13 @@ class HorizontalRadar(BasePlugin):
         self.geomgroup = (False, False, True, False, False, False)
         
         # 创建ROS发布者
+        qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
         self.radar_pub = self.simulator.create_publisher(
-            Float32MultiArray, self.topic_name, 10
+            Float32MultiArray, self.topic_name, qos
         )
         
         # 存储结果 - hazards_lidar

@@ -1,6 +1,7 @@
 from __future__ import annotations
 from sensor_msgs.msg import Imu as ImuMsg
 from geometry_msgs.msg import TransformStamped
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -25,7 +26,13 @@ class Imu2(BasePlugin):
         self.g_unit = plugin_config.get("g_unit", "g")
         self.sensor_prefix = plugin_config.get("sensor_prefix", "imu2")
 
-        self.imu_pub = self.simulator.create_publisher(ImuMsg, self.imu_topic, 10)
+        qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
+
+        self.imu_pub = self.simulator.create_publisher(ImuMsg, self.imu_topic, qos)
         self.imu_msg = ImuMsg()
 
         self.imu2_quat_head_id = self._find_sensor_head("imu quat", expected_suffix="_w")

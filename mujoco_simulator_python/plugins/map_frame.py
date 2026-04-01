@@ -1,4 +1,5 @@
 from __future__ import annotations
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from tf2_msgs.msg import TFMessage
 from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 from geometry_msgs.msg import TransformStamped
@@ -22,10 +23,16 @@ class MapFrame(BasePlugin):
         super().__init__(plugin_config, simulator)
         # 初始化状态
         self.map_triggered = False
+
+        qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
         
         # 订阅tf信息（用于map坐标系）
         self.tf_sub = self.simulator.create_subscription(
-            TFMessage, '/tf_static', self.map_tf_callback, 10
+            TFMessage, '/tf_static', self.map_tf_callback, qos
         )
         
         self.simulator.get_logger().info("Map坐标系插件已启用")

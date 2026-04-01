@@ -1,6 +1,7 @@
 from __future__ import annotations
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -20,9 +21,15 @@ class Odom(BasePlugin):
         super().__init__(plugin_config, simulator)
         # 读取配置
         self.odom_topic = plugin_config.get("odomTopic", "/robot_odom")
+
+        qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
         
         # 创建发布者
-        self.odom_pub = self.simulator.create_publisher(Odometry, self.odom_topic, 10)
+        self.odom_pub = self.simulator.create_publisher(Odometry, self.odom_topic, qos)
     
     def execute(self):
         """执行里程计发布"""

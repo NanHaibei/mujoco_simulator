@@ -1,6 +1,7 @@
 from __future__ import annotations
 import mujoco
 import numpy as np
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header
 from geometry_msgs.msg import TransformStamped
@@ -55,10 +56,16 @@ class Lidar(BasePlugin):
                 'ti_init_args': {'device_memory_GB': 4.0}
             }
         )
+
+        qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
         
         # 点云发布者
         self.point_cloud_pub = self.simulator.create_publisher(
-            PointCloud2, "/point_cloud", 100
+            PointCloud2, "/point_cloud", qos
         )
     
     def execute(self):

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import JointState
 from typing import TYPE_CHECKING
 
@@ -17,9 +18,14 @@ class JointStates(BasePlugin):
     def __init__(self, plugin_config: dict, simulator: mujoco_simulator):
         """初始化关节状态插件"""
         super().__init__(plugin_config, simulator)
+        qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
         # 创建发布者
         self.joint_state_pub = self.simulator.create_publisher(
-            JointState, "/joint_states", 10
+            JointState, "/joint_states", qos
         )
     
     def execute(self):

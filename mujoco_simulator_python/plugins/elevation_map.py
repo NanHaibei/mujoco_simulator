@@ -2,6 +2,7 @@ from __future__ import annotations
 import mujoco
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Float32MultiArray
 from typing import TYPE_CHECKING
 
@@ -201,9 +202,15 @@ class ElevationMap(BasePlugin):
         self.grid_size_x = round(self.map_size[0] / self.map_resolution) + 1
         self.grid_size_y = round(self.map_size[1] / self.map_resolution) + 1
         self.elevation_sample_point = np.zeros((self.grid_size_x * self.grid_size_y, 3), dtype=np.float32)
+
+        qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
         
         # 声明elevation map发布者
-        self.elevation_pub = self.simulator.create_publisher(Float32MultiArray, self.map_topic, 1)
+        self.elevation_pub = self.simulator.create_publisher(Float32MultiArray, self.map_topic, qos)
     
     def execute(self):
         """执行高程图生成和发布"""
