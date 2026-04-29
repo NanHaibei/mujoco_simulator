@@ -27,7 +27,7 @@ mujoco_simulator:
 
       # 发布状态
       - path: "low_state:LowState"
-        step_interval: 1 
+        step_interval: 1
         lowStateTopic: "/das_low_state"
         stateDelay: 0
         noise_imu_angle_acc: 0.0
@@ -35,14 +35,14 @@ mujoco_simulator:
         noise_joint_pos: 0.0
         noise_joint_vel: 0.0
 
-      # 高程图
-      # - path: "elevation_map:ElevationMap"
-      #   step_interval: 8
-      #   topic: "/elevation/map_array"
-      #   attach_link_name: "lidar_site"
-      #   size: [1.35, 0.95]
-      #   resolution: 0.05
-      #   noise_elevation_map: 0.0
+#      高程图
+      - path: "elevation_map:ElevationMap"
+        step_interval: 8
+        topic: "/elevation/map_array"
+        attach_link_name: "lidar_site"
+        size: [1.35, 0.95]
+        resolution: 0.05
+        noise_elevation_map: 0.0
 
       # 关节状态发布（rviz/foxglove可视化，建议开启）
       # - path: "joint_state:JointStates"
@@ -63,32 +63,32 @@ mujoco_simulator:
       #   imuTopic: "/imu"
       #   g_unit: "g"
 
-      # 第二套IMU数据发布（torso上的 imu2，sensor_prefix是用于改不同传感器的，可复用）
-      # - path: "imu2:Imu2"
-      #   step_interval: 2
-      #   imu2_topic: "/secondary_imu/converted"
-      #   frame_id: "imu2_frame"
-      #   sensor_prefix: "imu2"
-      #   g_unit: "g"
-
-      # # 激光雷达
-      # - path: "lidar:Lidar"
-      #   step_interval: 50
-      #   pointCloudTopic: "/point_cloud"
-      #   pointCloudType: "PointCloud2"
+##       第二套IMU数据发布（torso上的 imu2，sensor_prefix是用于改不同传感器的，可复用）
+#      - path: "imu2:Imu2"
+#        step_interval: 2
+#        imu2_topic: "/secondary_imu/converted"
+#        frame_id: "imu2_frame"
+#        sensor_prefix: "imu2"
+#        g_unit: "g"
+#
+#      # 激光雷达
+#      - path: "lidar:Lidar"
+#        step_interval: 50
+#        pointCloudTopic: "/point_cloud"
+#        pointCloudType: "PointCloud2"
 
       # 水平雷达（障碍物感知 + 目标点感知）
-      # - path: "horizontal_radar:HorizontalRadar"
-      #   step_interval: 10
-      #   site_name: "lidar_site"
-      #   offset: [0.0, 0.0, 0.5]  # 在site坐标系下的位置偏移 [x, y, z]
-      #   num_rays: 64
-      #   num_bins: 16
-      #   max_distance: 3.0           # hazards_lidar 最大探测距离
-      #   goal_max_distance: 15.0     # goal_lidar 最大探测距离
-      #   goal_position: [10.0, 0.0]   # 目标点世界坐标 [x, y]
-      #   topic_name: "/horizontal_radar"
-      #   enable_visualization: true
+#      - path: "horizontal_radar:HorizontalRadar"
+#        step_interval: 10
+#        site_name: "lidar_site"
+#        offset: [0.0, 0.0, 0.5]  # 在site坐标系下的位置偏移 [x, y, z]
+#        num_rays: 64
+#        num_bins: 16
+#        max_distance: 3.0           # hazards_lidar 最大探测距离
+#        goal_max_distance: 15.0     # goal_lidar 最大探测距离
+#        goal_position: [10.0, 0.0]   # 目标点世界坐标 [x, y]
+#        topic_name: "/horizontal_radar"
+#        enable_visualization: true
 
       # Map坐标系
       # - path: "map_frame:MapFrame"
