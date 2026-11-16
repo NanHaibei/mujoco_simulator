@@ -1,0 +1,17 @@
+<mujoco model="scene_go2">
+  <include file="unitree_go2/go2_mjx.xml"/>
+  <include file="scene.xml"/>
+
+  <keyframe>
+    <key name="home"
+      qpos="
+      0 0 0.278
+      1 0 0 0
+      0.1 0.9 -1.8
+      -0.1 0.9 -1.8
+      0.1 0.9 -1.8
+      -0.1 0.9 -1.8"
+      ctrl="0.1 0.9 -1.8 -0.1 0.9 -1.8 0.1 0.9 -1.8 -0.1 0.9 -1.8"/>
+  </keyframe>
+
+</mujoco>

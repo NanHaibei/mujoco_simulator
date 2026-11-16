@@ -1,0 +1,32 @@
+mujoco_simulator:
+  simRate: 200.0  # Hz，设置 model.opt.timestep = 1 / simRate
+  renderRate: 60.0  # 插件可视化快照的目标频率，浏览器渲染由 Studio 管理
+  # 相对本配置文件所在目录解析。
+  # mjcfPath: "../../robot_description/G1/mjcf/scene_G1_29dof_flat.xml"
+  mjcfPath: "../../robot_description/G1/mjcf/scene_G1_29dof_rough.xml"
+  enableLogOutput: false
+  logOutputInterval: 2
+
+  # 顺序决定执行次序；模型信息应放在最前面。
+  plugins:
+    - path: "model_info:ModelInfo"
+      step_interval: 1
+      show_table: false
+
+    - path: "unitree_g1_sdk:UnitreeG1SDK"
+      step_interval: 1
+      cmdDelay: 0
+      command_topic: "rt/lowcmd"
+      state_topic: "rt/lowstate"
+      stateDelay: 0
+      noise_imu_angle_acc: 0.0
+      noise_imu_gravity: 0.0
+      noise_joint_pos: 0.0
+      noise_joint_vel: 0.0
+
+    - path: "elevation_map:ElevationMap"
+      step_interval: 8
+      attach_link_name: "lidar_site"
+      size: [1.35, 0.95]
+      resolution: 0.05
+      noise_elevation_map: 0.0

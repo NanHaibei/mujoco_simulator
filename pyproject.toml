@@ -1,0 +1,15 @@
+[project]
+name = "mujoco-simulator"
+version = "0.1.0"
+description = "MuJoCo 4.0 Studio simulator with transport hooks for a future Unitree SDK integration"
+requires-python = ">=3.12"
+dependencies = [
+    "mujoco==4.0.0",
+    "numpy>=1.26",
+    "PyYAML>=6.0",
+    "rich>=13.0",
+    "scipy>=1.11",
+]
+
+[tool.uv]
+package = false
