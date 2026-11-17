@@ -10,15 +10,24 @@ from pathlib import Path
 import time
 
 import mujoco
-from mujoco.studio import app, launch_web, messages, sim, sim_history, step_control
+from mujoco.studio import app, launch_web, messages, plugin, sim, sim_history, step_control
 from mujoco.studio import viewer_protocol
 from rich.console import Console
 from rich.logging import RichHandler
 import yaml
 
-from .studio_visualization import OverlaySnapshot, PluginVisualization
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class OverlaySnapshot(messages.Snapshot):
+    geoms: list[mujoco.MjvGeom]
+
+
+class PluginVisualization(plugin.ViewerPlugin):
+    @messages.handler
+    def _on_overlay(self, snapshot: OverlaySnapshot):
+        self.viewer.extra_geoms[:] = snapshot.geoms
 
 
 @dataclass
@@ -334,4 +343,10 @@ def main(args=None):
 
 
 if __name__ == "__main__":
+    import sys
+
+    # 通过包内入口启动，保证插件和快照类型使用统一的模块路径。
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from mujoco_simulator_python.mujoco_simulator_python import main
+
     main()

@@ -7,18 +7,19 @@
 在 `src/mujoco_simulator` 中执行：
 
 ```bash
-uv run main.py --config g1_base.yaml
-uv run main.py --config simulate.yaml
+uv run mujoco_simulator_python/mujoco_simulator_python.py --config g1_base.yaml
+uv run mujoco_simulator_python/mujoco_simulator_python.py --config simulate.yaml
 ```
 
 必须通过 `--config` 指定本项目 `config/` 目录下已有的 `.yaml` 文件名；未指定时抛出 `ValueError`。在工作区根目录运行：
 
 ```bash
-uv run --project src/mujoco_simulator src/mujoco_simulator/main.py \
+uv run --project src/mujoco_simulator \
+  src/mujoco_simulator/mujoco_simulator_python/mujoco_simulator_python.py \
   --config g1_base.yaml
 ```
 
-终端会输出网页地址，手动打开即可。可用 `--port 8080` 指定端口。`custom_step.py` 和 `python -m mujoco_simulator_python` 也调用同一个入口。
+终端会输出网页地址，手动打开即可。可用 `--port 8080` 指定端口。启动入口统一使用 `mujoco_simulator_python/mujoco_simulator_python.py`。
 
 `g1_base.yaml` 配置加载本工作区的 G1 29 自由度平地场景。模型路径仅从 YAML 的 `mjcfPath` 读取；相对路径以 YAML 所在目录为基准解析，也可以在 YAML 中使用绝对路径。MJCF 仅在程序启动时加载，更换模型需修改配置并重新启动程序。
 
