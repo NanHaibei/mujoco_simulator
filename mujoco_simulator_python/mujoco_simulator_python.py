@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 import importlib
 import logging
 import math
+import os
 from pathlib import Path
+import platform
 import time
 
 import mujoco
@@ -336,6 +338,15 @@ def main(args=None):
 
     # 拼接yaml文件路径
     config_path = PROJECT_ROOT / "config" / options.config
+
+    # 在导入宇树 SDK 前，为支持的平台提供仓库内的 CycloneDDS 默认路径。
+    dds_home = PROJECT_ROOT / "third_party" / "cyclonedds"
+    if (
+        platform.system() == "Linux"
+        and platform.machine() == "x86_64"
+        and (dds_home / "lib" / "libddsc.so").is_file()
+    ):
+        os.environ.setdefault("CYCLONEDDS_HOME", str(dds_home))
 
     # 实例化并仿真类并开始仿真
     simulator = MujocoSimulator(config_path)

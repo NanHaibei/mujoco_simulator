@@ -112,7 +112,10 @@ class UnitreeG1SDK(BasePlugin):
         self.mj_data.ctrl[:] = torque
 
     def after_step(self):
-        """更新电机与 IMU 状态，添加噪声后按延迟配置发送。"""
+        """
+        更新电机与 IMU 状态，添加噪声后按延迟配置发送。
+        目前还是使用单线程，测试过改成多线程并没有明显提升。
+        """
         if not self.should_execute():
             return
 

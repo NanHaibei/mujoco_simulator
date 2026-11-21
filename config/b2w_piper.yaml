@@ -1,0 +1,22 @@
+mujoco_simulator:
+    mjcfPath: "../../robot_description/b2w_piper/mjcf/scene_b2w_piper_leg.xml"
+    renderRate: 60.0
+    simRate: 500.0  # Hz，对应 MJCF 的 0.002 s 步长
+    enableLogOutput: false
+
+    plugins:
+      - path: "model_info:ModelInfo"
+        step_interval: 1
+        show_table: false
+
+      - path: "unitree_b2w_sdk:UnitreeB2WSDK"
+        step_interval: 1
+        domain_id: 0
+        command_topic: "rt/lowcmd"
+        state_topic: "rt/lowstate"
+        cmdDelay: 0
+        stateDelay: 0
+        noise_imu_angle_acc: 0.0
+        noise_imu_gravity: 0.0
+        noise_joint_pos: 0.0
+        noise_joint_vel: 0.0

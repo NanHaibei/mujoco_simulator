@@ -1,0 +1,4 @@
+Eclipse Cyclone DDS 0.10.2 for Linux x86_64
+Source: https://github.com/eclipse-cyclonedds/cyclonedds/tree/0.10.2
+Binary: libddsc.so supplied in thirdparty/lib/x86_64 by Unitree SDK2
+SHA-256: 4038630c231412f7b34a2ea60df192bbdebd0a57f22ac7f35c1b6d28323e695c
